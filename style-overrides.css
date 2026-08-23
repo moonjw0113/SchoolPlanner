@@ -1,0 +1,33 @@
+/* 최신 화면 조정: 오늘 수업은 세로로 한 교시씩 표시 */
+.planner-grid.view-today .daily-schedule {
+  grid-template-columns: 1fr;
+  gap: 7px;
+}
+
+.planner-grid.view-today .daily-row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  align-items: center;
+  min-height: 56px;
+  text-align: left;
+}
+
+.planner-grid.view-today .daily-period {
+  display: block;
+  margin: 0;
+  font-size: 13px;
+}
+
+.planner-grid.view-today .daily-subject {
+  display: block;
+  height: auto;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+
+@media (max-width: 620px) {
+  .planner-grid.view-today .daily-schedule {
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+}
