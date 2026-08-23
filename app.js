@@ -27,10 +27,10 @@ const defaultSchedule = {
   7: ['창체', '음악', '', '공통영어', '창체']
 };
 const defaultTeachers = {
-  1: ['이지은', '임태형', '심선덕', '김영', '김영'],
+  1: ['이지은', '임태형', '심선덕', '금영충', '김석영'],
   2: ['안혜리', '임지은', '이경수', '최진현', '박문주'],
   3: ['박문주', '김세인', '정이슬', '김민소', '임지은'],
-  4: ['이선미', '신명은', '김영', '임지은', '정찬원'],
+  4: ['이선미', '신명은', '금영충', '임지은', '정찬원'],
   5: ['강경완', '최경화', '박문주', '안진선', '김지훈'],
   6: ['임지은', '강경완', '신명은', '심선덕', ''],
   7: ['', '이경수', '', '이지은', '']
@@ -293,7 +293,7 @@ function setupRealtime() {
   if (!supabaseClient) return;
 
   if (realtimeChannel) {
-    try { supabaseClient.removeChannel(realtimeChannel); } catch (e) {}
+    try { supabaseClient.removeChannel(realtimeChannel); } catch (e) { }
   }
 
   try {
@@ -339,7 +339,7 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('beforeunload', () => {
   stopFallbackTimer();
   if (supabaseClient && realtimeChannel) {
-    try { supabaseClient.removeChannel(realtimeChannel); } catch (e) {}
+    try { supabaseClient.removeChannel(realtimeChannel); } catch (e) { }
   }
 });
 
