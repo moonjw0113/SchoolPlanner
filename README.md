@@ -20,10 +20,11 @@
 ## 🛠️ Supabase 데이터베이스 연결 방법
 
 1. [Supabase](https://supabase.com)에 로그인 후 새 프로젝트를 생성합니다.
-2. **SQL Editor**로 이동하여 아래 SQL 문을 실행해 `assessments` 테이블을 생성합니다.
+2. **SQL Editor**로 이동하여 아래 SQL 문을 복사하여 실행합니다. (테이블 생성, RLS 권한 설정 및 Realtime 활성화)
 
 ```sql
-create table assessments (
+-- 1. 수행평가 및 과제 테이블
+create table if not exists assessments (
   id text primary key,
   title text not null,
   type text default '과제',
@@ -37,11 +38,54 @@ create table assessments (
   updated_at timestamptz default now()
 );
 
--- 모든 사용자가 조회 및 데이터를 등록/수정/삭제할 수 있도록 RLS 정책 설정 (필요 시)
+-- 2. 시간표 테이블 (정규 요일/교시 시간표)
+create table if not exists timetable (
+  id text primary key,
+  period integer not null,
+  day_of_week integer not null,
+  subject text default '',
+  teacher text default '',
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- 3. 과목별 기본 장소 테이블
+create table if not exists subject_locations (
+  subject text primary key,
+  default_location text default '',
+  updated_at timestamptz default now()
+);
+
+-- 4. 특정 날짜 장소 변경 테이블
+create table if not exists timetable_location_overrides (
+  id text primary key,
+  date text not null,
+  period integer not null,
+  location text default '',
+  updated_at timestamptz default now()
+);
+
+-- Row Level Security (RLS) 활성화
 alter table assessments enable row level security;
-create policy "Allow all access to assessments" on assessments
-  for all using (true) with check (true);
+alter table timetable enable row level security;
+alter table subject_locations enable row level security;
+alter table timetable_location_overrides enable row level security;
+
+-- 조회/수정 정책 설정 (클라이언트 비밀번호 7777 권한 제어와 연동)
+create policy "Allow all access to assessments" on assessments for all using (true) with check (true);
+create policy "Allow all access to timetable" on timetable for all using (true) with check (true);
+create policy "Allow all access to subject_locations" on subject_locations for all using (true) with check (true);
+create policy "Allow all access to timetable_location_overrides" on timetable_location_overrides for all using (true) with check (true);
+
+-- ⚡ Supabase Realtime (Postgres Changes) 활성화
+alter publication supabase_realtime add table assessments;
+alter publication supabase_realtime add table timetable;
+alter publication supabase_realtime add table subject_locations;
+alter publication supabase_realtime add table timetable_location_overrides;
 ```
+
+> **참고 (Realtime 대시보드 설정)**:
+> SQL 구문 실행 외에도 Supabase 대시보드의 **Database -> Publications -> `supabase_realtime`** 메뉴에서 해당 테이블들의 INSERT, UPDATE, DELETE 토글을 직접 활성화하실 수도 있습니다.
 
 3. Supabase 프로젝트의 **Project Settings -> API**에서 `Project URL`과 `anon public key`를 복사합니다.
 4. [`app.js`](file:///c:/Users/MoonJunWoo/Desktop/school-planner/app.js) 상단의 변수를 수정합니다:

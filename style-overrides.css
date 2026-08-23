@@ -25,9 +25,123 @@
   font-size: 14px;
 }
 
+.daily-subject-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.daily-subject-cell .daily-subject {
+  flex: 1;
+}
+
+.daily-loc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: #edf2ff;
+  color: #3b5bbb;
+  border: 1px solid #d0deff;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-left: 6px;
+}
+
+.daily-loc-badge.override {
+  background: #fff7e6;
+  color: #d48806;
+  border-color: #ffe7ba;
+}
+
+.tiny-loc-btn {
+  background: #f4f5f7;
+  color: #555866;
+  border: 1px solid #dcdee3;
+  padding: 5px 9px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: bold;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.tiny-loc-btn:hover {
+  background: var(--accent-2);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.schedule-loc-tag {
+  display: block;
+  font-size: 10px;
+  font-weight: bold;
+  color: #4a65bb;
+  margin-top: 3px;
+}
+
+.default-locations-panel {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+.default-locations-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.default-loc-item {
+  display: flex;
+  align-items: center;
+  background: #f9faeb;
+  border: 1px solid #e7eaed;
+  border-radius: 9px;
+  padding: 6px 10px;
+  gap: 8px;
+}
+
+.default-loc-name {
+  font-size: 12px;
+  font-weight: bold;
+  padding-left: 6px;
+  white-space: nowrap;
+  min-width: 64px;
+}
+
+.default-loc-input {
+  padding: 5px 8px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid #dcdfe4;
+}
+
+.loc-default-info {
+  background: #f4f5f7;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.loc-default-info strong {
+  color: var(--ink);
+}
+
 @media (max-width: 620px) {
   .planner-grid.view-today .daily-schedule {
     grid-template-columns: 1fr;
     overflow: visible;
   }
+  .daily-subject-cell {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .tiny-loc-btn {
+    align-self: flex-end;
+  }
 }
+
