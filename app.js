@@ -48,6 +48,7 @@ const STORAGE_KEY = 'school-planner-assessments-v1';
 let items = [];
 let defaultLocations = {};
 let dateLocations = {};
+let dateTimetableOverrides = {};
 let dbSchedule = { ...defaultSchedule };
 let dbTeachers = { ...defaultTeachers };
 let selectedDate = new Date(), editImage = '', editingId = null;
@@ -56,7 +57,25 @@ const $ = id => document.getElementById(id);
 const fmtDate = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const dateText = iso => new Intl.DateTimeFormat('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' }).format(new Date(`${iso}T12:00:00`));
 const escape = text => String(text).replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
-function daySubject(iso, period) { const week = new Date(`${iso}T12:00:00`).getDay(); return week && week < 6 && period ? dbSchedule[period]?.[week - 1] || '' : ''; }
+
+function getEffectiveLesson(isoDate, period, dayOfWeek) {
+  if (isoDate && period && dateTimetableOverrides[isoDate] && dateTimetableOverrides[isoDate][period]) {
+    const ov = dateTimetableOverrides[isoDate][period];
+    if (ov && (ov.subject !== undefined || ov.teacher !== undefined)) {
+      return { subject: ov.subject || '', teacher: ov.teacher || '', isOverride: true };
+    }
+  }
+  const dow = dayOfWeek !== undefined ? dayOfWeek : (isoDate ? new Date(`${isoDate}T12:00:00`).getDay() : 0);
+  const subj = (period && dow >= 1 && dow <= 5) ? dbSchedule[period]?.[dow - 1] || '' : '';
+  const tch = (period && dow >= 1 && dow <= 5) ? dbTeachers[period]?.[dow - 1] || '' : '';
+  return { subject: subj, teacher: tch, isOverride: false };
+}
+
+function daySubject(iso, period) {
+  const week = new Date(`${iso}T12:00:00`).getDay();
+  return getEffectiveLesson(iso, period, week).subject;
+}
+
 function toast(message) { const box = $('toast'); box.textContent = message; box.classList.add('show'); setTimeout(() => box.classList.remove('show'), 2800); }
 
 function getLocation(isoDate, period, subject) {
@@ -185,10 +204,32 @@ async function loadDateLocationsData() {
   }
 }
 
+async function loadDateTimetableOverridesData() {
+  if (!supabaseClient) return;
+  try {
+    const { data, error } = await supabaseClient.from('timetable_overrides').select('*');
+    if (error) throw error;
+    const map = {};
+    (data || []).forEach(row => {
+      if (row.date && row.period) {
+        if (!map[row.date]) map[row.date] = {};
+        map[row.date][row.period] = {
+          subject: row.subject || '',
+          teacher: row.teacher || ''
+        };
+      }
+    });
+    dateTimetableOverrides = map;
+  } catch (err) {
+    console.error('timetable_overrides 로드 실패:', err);
+  }
+}
+
 async function loadAllData() {
   await Promise.all([
     loadItemsData(),
     loadTimetableData(),
+    loadDateTimetableOverridesData(),
     loadDefaultLocationsData(),
     loadDateLocationsData()
   ]);
@@ -199,9 +240,155 @@ async function loadAllDataSilently() {
   await Promise.all([
     loadItemsData(),
     loadTimetableData(),
+    loadDateTimetableOverridesData(),
     loadDefaultLocationsData(),
     loadDateLocationsData()
   ]);
+  render();
+}
+
+async function saveDefaultTimetable(newSchedule, newTeachers) {
+  if (!isAdmin) {
+    toast('등록 권한이 필요합니다.');
+    return;
+  }
+  dbSchedule = newSchedule;
+  dbTeachers = newTeachers;
+
+  if (supabaseClient) {
+    const rows = [];
+    Object.entries(newSchedule).forEach(([period, subjects]) => {
+      subjects.forEach((subj, idx) => {
+        const p = Number(period);
+        const dow = idx + 1;
+        const tch = newTeachers[p]?.[idx] || '';
+        rows.push({
+          id: `p${p}_d${dow}`,
+          period: p,
+          day_of_week: dow,
+          subject: subj || '',
+          teacher: tch || '',
+          updated_at: new Date().toISOString()
+        });
+      });
+    });
+    try {
+      const { error } = await supabaseClient.from('timetable').upsert(rows);
+      if (error) throw error;
+    } catch (e) {
+      console.error('Supabase 기본 시간표 저장 오류:', e);
+      toast('기본 시간표 저장에 실패했습니다.');
+      return;
+    }
+  }
+  render();
+  toast('기본 시간표가 저장되었습니다.');
+}
+
+async function saveDateTimetableOverride(isoDate, periodOverrides) {
+  if (!isAdmin) {
+    toast('등록 권한이 필요합니다.');
+    return;
+  }
+  if (!dateTimetableOverrides[isoDate]) {
+    dateTimetableOverrides[isoDate] = {};
+  }
+
+  const rowsToUpsert = [];
+  const idsToDelete = [];
+
+  Object.entries(periodOverrides).forEach(([period, data]) => {
+    const p = Number(period);
+    const id = `${isoDate}_${p}`;
+    const subj = (data.subject || '').trim();
+    const tch = (data.teacher || '').trim();
+
+    if (!subj && !tch) {
+      delete dateTimetableOverrides[isoDate][p];
+      idsToDelete.push(id);
+    } else {
+      dateTimetableOverrides[isoDate][p] = { subject: subj, teacher: tch };
+      rowsToUpsert.push({
+        id: id,
+        date: isoDate,
+        period: p,
+        subject: subj,
+        teacher: tch,
+        updated_at: new Date().toISOString()
+      });
+    }
+  });
+
+  if (Object.keys(dateTimetableOverrides[isoDate]).length === 0) {
+    delete dateTimetableOverrides[isoDate];
+  }
+
+  if (supabaseClient) {
+    try {
+      if (idsToDelete.length) {
+        await supabaseClient.from('timetable_overrides').delete().in('id', idsToDelete);
+      }
+      if (rowsToUpsert.length) {
+        const { error } = await supabaseClient.from('timetable_overrides').upsert(rowsToUpsert);
+        if (error) throw error;
+      }
+    } catch (e) {
+      console.error('Supabase 특정 날짜 시간표 저장 오류:', e);
+      toast('특정 날짜 시간표 저장에 실패했습니다.');
+      return;
+    }
+  }
+  render();
+  toast(`${dateText(isoDate)} 시간표 변경이 저장되었습니다.`);
+}
+
+async function resetDateTimetableOverride(isoDate) {
+  if (!isAdmin) {
+    toast('등록 권한이 필요합니다.');
+    return;
+  }
+  if (!dateTimetableOverrides[isoDate]) {
+    toast('변경 내역이 없습니다.');
+    return;
+  }
+  delete dateTimetableOverrides[isoDate];
+  if (supabaseClient) {
+    try {
+      const { error } = await supabaseClient.from('timetable_overrides').delete().eq('date', isoDate);
+      if (error) throw error;
+    } catch (e) {
+      console.error('Supabase 특정 날짜 시간표 초기화 오류:', e);
+      toast('시간표 초기화에 실패했습니다.');
+      return;
+    }
+  }
+  render();
+  toast(`${dateText(isoDate)} 시간표가 기본 시간표로 복원되었습니다.`);
+}
+
+function applyNeisTimetableData(defaultRows, overrideRows) {
+  if (Array.isArray(defaultRows)) {
+    const scheduleMap = { 1: ['', '', '', '', ''], 2: ['', '', '', '', ''], 3: ['', '', '', '', ''], 4: ['', '', '', '', ''], 5: ['', '', '', '', ''], 6: ['', '', '', '', ''], 7: ['', '', '', '', ''] };
+    const teacherMap = { 1: ['', '', '', '', ''], 2: ['', '', '', '', ''], 3: ['', '', '', '', ''], 4: ['', '', '', '', ''], 5: ['', '', '', '', ''], 6: ['', '', '', '', ''], 7: ['', '', '', '', ''] };
+    defaultRows.forEach(row => {
+      if (row.period >= 1 && row.period <= 7 && row.day_of_week >= 1 && row.day_of_week <= 5) {
+        scheduleMap[row.period][row.day_of_week - 1] = row.subject || '';
+        teacherMap[row.period][row.day_of_week - 1] = row.teacher || '';
+      }
+    });
+    dbSchedule = scheduleMap;
+    dbTeachers = teacherMap;
+  }
+  if (Array.isArray(overrideRows)) {
+    const map = {};
+    overrideRows.forEach(row => {
+      if (row.date && row.period) {
+        if (!map[row.date]) map[row.date] = {};
+        map[row.date][row.period] = { subject: row.subject || '', teacher: row.teacher || '' };
+      }
+    });
+    dateTimetableOverrides = map;
+  }
   render();
 }
 
@@ -301,6 +488,7 @@ function setupRealtime() {
       .channel('school-planner-realtime-v2')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'assessments' }, () => loadAllDataSilently())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'timetable' }, () => loadAllDataSilently())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'timetable_overrides' }, () => loadAllDataSilently())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'subject_locations' }, () => loadAllDataSilently())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'timetable_location_overrides' }, () => loadAllDataSilently())
       .subscribe((status) => {
@@ -346,6 +534,8 @@ window.addEventListener('beforeunload', () => {
 function updateAuthUI() {
   const authBtn = $('authBtn');
   const newBtn = $('newEntryBtn');
+  const editDefaultBtn = $('editDefaultTimetableBtn');
+  const editDateBtn = $('editDateTimetableBtn');
   if (authBtn) {
     if (isAdmin) {
       authBtn.textContent = '🔒 등록 권한 해제';
@@ -357,6 +547,12 @@ function updateAuthUI() {
   }
   if (newBtn) {
     newBtn.style.display = isAdmin ? 'inline-flex' : 'none';
+  }
+  if (editDefaultBtn) {
+    editDefaultBtn.style.display = isAdmin ? 'inline-flex' : 'none';
+  }
+  if (editDateBtn) {
+    editDateBtn.style.display = isAdmin ? 'inline-flex' : 'none';
   }
 }
 
@@ -448,43 +644,196 @@ function renderCalendar() {
     return `<div class="day ${inMonth ? '' : 'other'} ${weekday === 0 ? 'sun' : ''} ${weekday === 6 ? 'sat' : ''} ${holiday ? 'holiday' : ''} ${iso === today ? 'today' : ''}" data-date="${iso}"><span class="date-number">${date.getDate()}</span>${holiday ? `<div class="holiday-name">${holiday}</div>` : ''}${events}${dayItems.length > 3 ? `<div class="more">+ ${dayItems.length - 3}개 더</div>` : ''}</div>`;
   }).join('');
 }
-function renderUpcoming() { const monthPrefix = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}`; const monthItems = items.filter(item => item.date.startsWith(monthPrefix)).sort((a, b) => a.date.localeCompare(b.date) || Number(a.period || 99) - Number(b.period || 99)); $('openCount').textContent = `${monthItems.length}개 일정`; $('upcomingList').innerHTML = monthItems.length ? monthItems.slice(0, 8).map(item => `<article class="task-card" data-id="${item.id}"><div><h3>${escape(item.title)}</h3><div class="task-meta">${dateText(item.date)}${item.period ? ' · ' + item.period + '교시' : ''} <span class="subject-pill">· ${escape(item.subject)}</span></div></div></article>`).join('') : '<p class="nothing">이번 달 일정이 없어요.</p>'; }
+function renderUpcoming() {
+  const monthPrefix = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}`;
+  const monthItems = items.filter(item => item.date.startsWith(monthPrefix)).sort((a, b) => a.date.localeCompare(b.date) || Number(a.period || 99) - Number(b.period || 99));
+  $('openCount').textContent = `${monthItems.length}개 일정`;
+  if (!monthItems.length) {
+    $('upcomingList').innerHTML = '<p class="nothing">이번 달 일정이 없어요.</p>';
+    return;
+  }
+  $('upcomingList').innerHTML = monthItems.slice(0, 8).map(item => {
+    const borderColor = subjectColors[item.subject] || '#506cfe';
+    return `<article class="task-card" data-id="${item.id}" style="border-left-color:${borderColor}">
+      <div class="task-card-header">
+        <span class="task-type-badge type-${item.type || '과제'}">${escape(item.type || '과제')}</span>
+        <span class="task-subject-pill">${escape(item.subject)}</span>
+      </div>
+      <h3 class="task-title">${escape(item.title)}</h3>
+      <div class="task-meta">${dateText(item.date)}${item.period ? ' · ' + item.period + '교시' : ''}</div>
+    </article>`;
+  }).join('');
+}
+
 function renderDailyView() {
   const iso = $('scheduleDate').value || fmtDate(new Date()), date = new Date(`${iso}T12:00:00`), weekday = date.getDay(), today = fmtDate(new Date());
   $('dailyTitle').textContent = iso === today ? '오늘의 수업' : `${date.getMonth() + 1}월 ${date.getDate()}일 수업`;
   const holiday = holidays[iso];
+  const dayItems = items.filter(item => item.date === iso).sort((a, b) => Number(a.period || 99) - Number(b.period || 99));
+  const linkedItemIds = new Set();
+
   if (holiday) {
     $('dailySchedule').innerHTML = `<div class="daily-holiday">${holiday} · 수업이 없어요</div>`;
   } else if (weekday === 0 || weekday === 6) {
     $('dailySchedule').innerHTML = '<p class="daily-empty">주말에는 정규 수업이 없어요.</p>';
   } else {
-    $('dailySchedule').innerHTML = Object.entries(dbSchedule).map(([period, subjects]) => {
-      const subject = subjects[weekday - 1], teacher = dbTeachers[period]?.[weekday - 1];
-      if (!subject) return '';
-      const loc = getLocation(iso, period, subject);
-      const isOverride = isDateOverride(iso, period);
+    const periodMap = { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [] };
+
+    // Priority 1: Date + Period match
+    dayItems.forEach(item => {
+      if (item.period && Number(item.period) >= 1 && Number(item.period) <= 7) {
+        const pNum = Number(item.period);
+        periodMap[pNum].push(item);
+        linkedItemIds.add(item.id);
+      }
+    });
+
+    // Priority 2: Date + Subject match if period is missing (using getEffectiveLesson subject)
+    dayItems.forEach(item => {
+      if (!linkedItemIds.has(item.id) && item.subject) {
+        for (let p = 1; p <= 7; p++) {
+          const lesson = getEffectiveLesson(iso, p, weekday);
+          if (lesson.subject && lesson.subject === item.subject) {
+            periodMap[p].push(item);
+            linkedItemIds.add(item.id);
+          }
+        }
+      }
+    });
+
+    $('dailySchedule').innerHTML = Object.entries(dbSchedule).map(([period]) => {
+      const pNum = Number(period);
+      const lesson = getEffectiveLesson(iso, pNum, weekday);
+      const subject = lesson.subject;
+      const teacher = lesson.teacher;
+      if (!subject && !teacher) return '';
+
+      const loc = getLocation(iso, pNum, subject);
+      const isLocOverride = isDateOverride(iso, pNum);
+      const periodTasks = periodMap[pNum] || [];
+
       return `<div class="daily-row">
-        <span class="daily-period">${period}교시</span>
+        <span class="daily-period">${pNum}교시</span>
         <div class="daily-subject-cell">
-          <span class="daily-subject" style="border-color:${subjectColors[subject] || '#bdc3ce'}">
-            <span class="daily-subject-title">${escape(subject)}</span>
-            <small>${teacher ? escape(teacher) + ' 선생님' : '담당 선생님'}${loc ? ` <span class="daily-loc-badge ${isOverride ? 'override' : ''}">📍 ${escape(loc)}</span>` : ''}</small>
-          </span>
-          ${isAdmin ? `<button type="button" class="tiny-loc-btn" data-date="${iso}" data-period="${period}" data-subject="${escape(subject)}" title="해당 날짜 장소 변경">📍 장소 변경</button>` : ''}
+          <div class="daily-subject ${periodTasks.length ? 'has-tasks' : ''}" style="border-color:${subjectColors[subject] || '#bdc3ce'}">
+            <div class="daily-subject-header">
+              <div class="daily-subject-main-info">
+                <span class="daily-subject-title">${escape(subject || '수업')}</span>
+                <small class="daily-teacher-info">${teacher ? escape(teacher) + ' 선생님' : '담당 선생님'}${lesson.isOverride ? ` <span class="lesson-override-badge">⏰ 시간표 변경</span>` : ''}${loc ? ` <span class="daily-loc-badge ${isLocOverride ? 'override' : ''}">📍 ${escape(loc)}</span>` : ''}</small>
+              </div>
+              ${isAdmin ? `<button type="button" class="tiny-loc-btn" data-date="${iso}" data-period="${pNum}" data-subject="${escape(subject)}" title="해당 날짜 장소 변경">📍 장소 변경</button>` : ''}
+            </div>
+            ${periodTasks.length ? `
+              <div class="daily-period-tasks">
+                ${periodTasks.map(item => {
+                  const iconMap = { '수행평가': '📝', '과제': '📌', '시험': '✏️', '기타': '🏷️' };
+                  const icon = iconMap[item.type] || '📌';
+                  return `
+                    <div class="period-task-chip type-${item.type || '과제'}" data-id="${item.id}" title="클릭하여 일정 상세 보기">
+                      <span class="task-chip-badge">${icon} ${escape(item.type || '과제')}</span>
+                      <span class="task-chip-title">${escape(item.title)}</span>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            ` : ''}
+          </div>
         </div>
       </div>`;
     }).join('');
   }
-  const dayItems = items.filter(item => item.date === iso).sort((a, b) => Number(a.period || 99) - Number(b.period || 99));
-  $('dailyTasks').innerHTML = dayItems.length ? `<h3>그날의 수행평가 · 과제</h3>${dayItems.map(item => `<div class="daily-task" data-id="${item.id}">${item.period ? item.period + '교시 · ' : ''}${escape(item.title)}</div>`).join('')}` : '';
+
+  // Priority 3: Unlinked items
+  const unlinkedItems = dayItems.filter(item => !linkedItemIds.has(item.id));
+  if (unlinkedItems.length) {
+    $('dailyTasks').innerHTML = `<h3>오늘의 기타 / 교시 미지정 수행평가 · 과제</h3>${unlinkedItems.map(item => `
+      <div class="daily-task" data-id="${item.id}" title="클릭하여 일정 상세 보기">
+        ${item.period ? item.period + '교시 · ' : ''}${item.subject ? '[' + escape(item.subject) + '] ' : ''}${escape(item.title)}
+      </div>
+    `).join('')}`;
+  } else {
+    $('dailyTasks').innerHTML = '';
+  }
+}
+
+function getWeekDays(refDate = new Date()) {
+  const d = new Date(refDate);
+  d.setHours(12, 0, 0, 0);
+  const day = d.getDay();
+  const diffToMon = (day === 0 ? -6 : 1 - day);
+  const monday = new Date(d);
+  monday.setDate(d.getDate() + diffToMon);
+
+  const weekDates = [];
+  for (let i = 0; i < 5; i++) {
+    const date = new Date(monday);
+    date.setDate(monday.getDate() + i);
+    weekDates.push(fmtDate(date));
+  }
+  return weekDates;
 }
 
 function renderTimetable() {
-  $('timetableList').innerHTML = `<div class="schedule-header">${['월', '화', '수', '목', '금'].map(day => `<span>${day}</span>`).join('')}</div>` + Object.entries(dbSchedule).map(([period, subjects]) => `<div class="schedule-row"><span class="schedule-period">${period}</span><div class="schedule-subjects">${subjects.map((subject, index) => {
-    const loc = getLocation('', period, subject);
-    return `<span title="${subject}" style="background:${subjectColors[subject] || 'transparent'}">${subject || '—'}${subject && dbTeachers[period]?.[index] ? `<small>${dbTeachers[period][index]} 선생님</small>` : ''}${loc ? `<small class="schedule-loc-tag">📍 ${escape(loc)}</small>` : ''}</span>`;
-  }).join('')}</div></div>`).join('');
-  $('subjects').innerHTML = Object.keys(subjectColors).map(subject => `<option value="${subject}">`).join('');
+  const container = $('timetableList');
+  if (!container) return;
+
+  const refDateInput = $('scheduleDate')?.value;
+  const refDate = refDateInput ? new Date(`${refDateInput}T12:00:00`) : selectedDate;
+  const weekDates = getWeekDays(refDate);
+  const todayStr = fmtDate(new Date());
+
+  const daysLabel = ['월', '화', '수', '목', '금'];
+  
+  const headerHtml = `<div class="schedule-header">` +
+    daysLabel.map((dayName, idx) => {
+      const iso = weekDates[idx];
+      const [, m, d] = iso.split('-');
+      const isToday = (iso === todayStr);
+      return `<span class="${isToday ? 'is-today' : ''}">${dayName}<small>(${Number(m)}/${Number(d)})</small></span>`;
+    }).join('') +
+  `</div>`;
+
+  const rowsHtml = Object.keys(dbSchedule).map(periodStr => {
+    const period = Number(periodStr);
+    const cellsHtml = weekDates.map((isoDate, dowIdx) => {
+      const dow = dowIdx + 1;
+      const lesson = getEffectiveLesson(isoDate, period, dow);
+      const subject = lesson.subject;
+      const teacher = lesson.teacher;
+      const loc = getLocation(isoDate, period, subject);
+      const isLocOverride = isDateOverride(isoDate, period);
+      const isToday = (isoDate === todayStr);
+
+      const cellBg = subjectColors[subject] || 'transparent';
+      const classes = [
+        'schedule-cell',
+        lesson.isOverride ? 'has-override' : '',
+        isToday ? 'is-today' : ''
+      ].filter(Boolean).join(' ');
+
+      return `
+        <span class="${classes}" title="${escape(subject)}${teacher ? ' (' + escape(teacher) + ' 선생님)' : ''}${lesson.isOverride ? ' [⏰ 시간표 변경됨]' : ''}" style="background:${cellBg}">
+          ${lesson.isOverride ? `<small class="schedule-override-tag">🔄 변경</small>` : ''}
+          <span class="schedule-cell-subject">${escape(subject || '—')}</span>
+          ${teacher ? `<small class="schedule-cell-teacher">${escape(teacher)}</small>` : ''}
+          ${loc ? `<small class="schedule-loc-tag ${isLocOverride ? 'override' : ''}">📍 ${escape(loc)}</small>` : ''}
+        </span>
+      `;
+    }).join('');
+
+    return `
+      <div class="schedule-row">
+        <span class="schedule-period">${period}</span>
+        <div class="schedule-subjects">${cellsHtml}</div>
+      </div>
+    `;
+  }).join('');
+
+  container.innerHTML = headerHtml + rowsHtml;
+  
+  if ($('subjects')) {
+    $('subjects').innerHTML = Object.keys(subjectColors).map(subject => `<option value="${subject}">`).join('');
+  }
   renderDefaultLocations();
 }
 
@@ -563,14 +912,97 @@ function openLocationDialog(date, period, subject) {
   $('locationDialog').showModal();
 }
 
+function renderDefaultTimetableEditGrid() {
+  const container = $('defaultTimetableEditGrid');
+  if (!container) return;
+
+  const days = ['월', '화', '수', '목', '금'];
+  let html = `<div class="timetable-edit-header">교시</div>` + days.map(d => `<div class="timetable-edit-header">${d}</div>`).join('');
+
+  for (let p = 1; p <= 7; p++) {
+    html += `<div class="timetable-edit-header">${p}교시</div>`;
+    for (let dow = 1; dow <= 5; dow++) {
+      const subj = dbSchedule[p]?.[dow - 1] || '';
+      const tch = dbTeachers[p]?.[dow - 1] || '';
+      html += `
+        <div class="timetable-edit-cell">
+          <input class="subject-input" data-period="${p}" data-dow="${dow}" value="${escape(subj)}" placeholder="과목" list="subjects" />
+          <input class="teacher-input" data-period="${p}" data-dow="${dow}" value="${escape(tch)}" placeholder="선생님" />
+        </div>
+      `;
+    }
+  }
+  container.innerHTML = html;
+}
+
+function openDefaultTimetableDialog() {
+  if (!isAdmin) {
+    toast('등록 권한이 필요합니다. 상단의 [🔑 등록 권한] 버튼을 클릭해 주세요.');
+    return;
+  }
+  renderDefaultTimetableEditGrid();
+  $('defaultTimetableDialog').showModal();
+}
+
+function renderDateTimetableEditGrid(isoDate) {
+  const container = $('dateTimetableEditGrid');
+  if (!container) return;
+
+  const week = new Date(`${isoDate}T12:00:00`).getDay();
+  let html = '';
+  for (let p = 1; p <= 7; p++) {
+    const defaultSubj = (week >= 1 && week <= 5) ? dbSchedule[p]?.[week - 1] || '' : '';
+    const defaultTch = (week >= 1 && week <= 5) ? dbTeachers[p]?.[week - 1] || '' : '';
+
+    const override = dateTimetableOverrides[isoDate]?.[p];
+    const activeSubj = override ? override.subject : '';
+    const activeTch = override ? override.teacher : '';
+
+    html += `
+      <div class="date-timetable-row">
+        <span class="date-timetable-period">${p}교시</span>
+        <input class="subject-input" data-period="${p}" value="${escape(activeSubj)}" placeholder="기본: ${escape(defaultSubj || '없음')}" list="subjects" />
+        <input class="teacher-input" data-period="${p}" value="${escape(activeTch)}" placeholder="기본: ${escape(defaultTch || '없음')}" />
+      </div>
+    `;
+  }
+  container.innerHTML = html;
+  if ($('overrideDateNotice')) {
+    $('overrideDateNotice').textContent = `${dateText(isoDate)} 교시별 수업을 변경합니다. (빈 칸으로 두면 기본 시간표 사용)`;
+  }
+}
+
+function openDateTimetableDialog(isoDate = '') {
+  if (!isAdmin) {
+    toast('등록 권한이 필요합니다. 상단의 [🔑 등록 권한] 버튼을 클릭해 주세요.');
+    return;
+  }
+  const dateToUse = isoDate || $('scheduleDate').value || fmtDate(new Date());
+  if ($('overrideDateInput')) $('overrideDateInput').value = dateToUse;
+  renderDateTimetableEditGrid(dateToUse);
+  $('dateTimetableDialog').showModal();
+}
+
 function previewImage(src) { $('imagePreview').innerHTML = src ? `<img alt="첨부 사진 미리보기" src="${src}">` : ''; }
 function getFileAsData(file) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); }); }
 
 if ($('authBtn')) $('authBtn').onclick = handleAuthToggle;
+if ($('editDefaultTimetableBtn')) $('editDefaultTimetableBtn').onclick = () => openDefaultTimetableDialog();
+if ($('editDateTimetableBtn')) $('editDateTimetableBtn').onclick = () => openDateTimetableDialog();
 $('newEntryBtn').onclick = () => openNew();
 $('prevMonth').onclick = () => { selectedDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth() - 1, 1); render(); };
 $('nextMonth').onclick = () => { selectedDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 1); render(); };
-document.querySelectorAll('.view-tab').forEach(button => button.addEventListener('click', () => { const view = button.dataset.view; $('plannerGrid').className = `planner-grid view-${view}`; document.querySelectorAll('.view-tab').forEach(tab => tab.classList.toggle('active', tab === button)); if (view === 'today') { $('scheduleDate').value = fmtDate(new Date()); renderDailyView(); } }));
+document.querySelectorAll('.view-tab').forEach(button => button.addEventListener('click', () => {
+  const view = button.dataset.view;
+  $('plannerGrid').className = `planner-grid view-${view}`;
+  document.querySelectorAll('.view-tab').forEach(tab => tab.classList.toggle('active', tab === button));
+  if (view === 'today') {
+    $('scheduleDate').value = fmtDate(new Date());
+    renderDailyView();
+  } else if (view === 'timetable') {
+    renderTimetable();
+  }
+}));
 $('scheduleToday').onclick = () => { $('scheduleDate').value = fmtDate(new Date()); renderDailyView(); };
 $('scheduleDate').addEventListener('change', renderDailyView);
 $('dailySchedule').addEventListener('click', event => {
@@ -578,6 +1010,11 @@ $('dailySchedule').addEventListener('click', event => {
   if (btn) {
     const { date, period, subject } = btn.dataset;
     openLocationDialog(date, period, subject);
+    return;
+  }
+  const task = event.target.closest('[data-id]');
+  if (task) {
+    openEdit(task.dataset.id);
   }
 });
 $('dailyTasks').addEventListener('click', event => { const task = event.target.closest('[data-id]'); if (task) openEdit(task.dataset.id); });
@@ -608,6 +1045,78 @@ if ($('resetLocBtn')) {
 }
 if ($('closeLocDialog')) $('closeLocDialog').onclick = () => $('locationDialog').close();
 if ($('cancelLocBtn')) $('cancelLocBtn').onclick = () => $('locationDialog').close();
+
+if ($('defaultTimetableForm')) {
+  $('defaultTimetableForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    if (!isAdmin) return;
+
+    const newSchedule = { 1: ['', '', '', '', ''], 2: ['', '', '', '', ''], 3: ['', '', '', '', ''], 4: ['', '', '', '', ''], 5: ['', '', '', '', ''], 6: ['', '', '', '', ''], 7: ['', '', '', '', ''] };
+    const newTeachers = { 1: ['', '', '', '', ''], 2: ['', '', '', '', ''], 3: ['', '', '', '', ''], 4: ['', '', '', '', ''], 5: ['', '', '', '', ''], 6: ['', '', '', '', ''], 7: ['', '', '', '', ''] };
+
+    document.querySelectorAll('#defaultTimetableEditGrid .timetable-edit-cell').forEach(cell => {
+      const subjInput = cell.querySelector('.subject-input');
+      const tchInput = cell.querySelector('.teacher-input');
+      if (subjInput && tchInput) {
+        const p = Number(subjInput.dataset.period);
+        const dow = Number(subjInput.dataset.dow);
+        newSchedule[p][dow - 1] = (subjInput.value || '').trim();
+        newTeachers[p][dow - 1] = (tchInput.value || '').trim();
+      }
+    });
+
+    await saveDefaultTimetable(newSchedule, newTeachers);
+    $('defaultTimetableDialog').close();
+  });
+}
+
+if ($('closeDefaultTimetableDialog')) $('closeDefaultTimetableDialog').onclick = () => $('defaultTimetableDialog').close();
+if ($('cancelDefaultTimetableBtn')) $('cancelDefaultTimetableBtn').onclick = () => $('defaultTimetableDialog').close();
+
+if ($('overrideDateInput')) {
+  $('overrideDateInput').addEventListener('change', (e) => {
+    if (e.target.value) renderDateTimetableEditGrid(e.target.value);
+  });
+}
+
+if ($('dateTimetableForm')) {
+  $('dateTimetableForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    if (!isAdmin) return;
+
+    const isoDate = $('overrideDateInput').value;
+    if (!isoDate) return;
+
+    const periodOverrides = {};
+    document.querySelectorAll('#dateTimetableEditGrid .date-timetable-row').forEach(row => {
+      const subjInput = row.querySelector('.subject-input');
+      const tchInput = row.querySelector('.teacher-input');
+      if (subjInput && tchInput) {
+        const p = Number(subjInput.dataset.period);
+        periodOverrides[p] = {
+          subject: (subjInput.value || '').trim(),
+          teacher: (tchInput.value || '').trim()
+        };
+      }
+    });
+
+    await saveDateTimetableOverride(isoDate, periodOverrides);
+    $('dateTimetableDialog').close();
+  });
+}
+
+if ($('resetDateTimetableBtn')) {
+  $('resetDateTimetableBtn').onclick = async () => {
+    if (!isAdmin) return;
+    const isoDate = $('overrideDateInput').value;
+    if (!isoDate) return;
+    await resetDateTimetableOverride(isoDate);
+    $('dateTimetableDialog').close();
+  };
+}
+
+if ($('closeDateTimetableDialog')) $('closeDateTimetableDialog').onclick = () => $('dateTimetableDialog').close();
+if ($('cancelDateTimetableBtn')) $('cancelDateTimetableBtn').onclick = () => $('dateTimetableDialog').close();
 
 const now = new Date();
 $('todayLabel').textContent = new Intl.DateTimeFormat('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' }).format(now);
