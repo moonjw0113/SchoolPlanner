@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="ko">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,10 +9,14 @@
   <link rel="stylesheet" href="style-overrides.css" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
+
 <body>
   <header class="topbar">
-    <a class="brand" id="brandBtn" href="#"><span class="brand-mark">✓</span><span>학교 플래너<small>수행평가 · 과제</small></span></a>
-    <nav class="view-tabs" aria-label="화면 선택"><button class="view-tab active" data-view="today">오늘</button><button class="view-tab" data-view="calendar">달력</button><button class="view-tab" data-view="timetable">시간표</button></nav>
+    <a class="brand" id="brandBtn" href="#"><span class="brand-mark">✓</span><span>학교 플래너<small>수행평가 ·
+          과제</small></span></a>
+    <nav class="view-tabs" aria-label="화면 선택"><button class="view-tab active" data-view="today">오늘</button><button
+        class="view-tab" data-view="calendar">달력</button><button class="view-tab" data-view="timetable">시간표</button>
+    </nav>
     <div class="top-actions">
       <button class="secondary" id="authBtn">🔑 등록 권한</button>
       <button class="primary" id="newEntryBtn">+ 일정 추가</button>
@@ -19,30 +24,63 @@
   </header>
   <main>
     <section class="hero">
-      <div><p class="eyebrow">종촌고 1학년 7반 · 2학기 시간표 연결</p><h1>해야 할 일을<br><em>한눈에.</em></h1></div>
+      <div>
+        <p class="eyebrow">종촌고 1학년 7반 · 2학기 시간표</p>
+        <h1>해야 할 일을<br><em>한눈에.</em></h1>
+      </div>
       <div class="hero-note"><span id="todayLabel"></span><strong id="todayStatus"></strong></div>
     </section>
     <section class="planner-grid view-today" id="plannerGrid">
       <div class="calendar-panel panel">
-        <div class="calendar-header"><div class="month-nav"><button aria-label="이전 달" id="prevMonth">‹</button><h2 id="monthTitle"></h2><button aria-label="다음 달" id="nextMonth">›</button></div><span class="holiday-key">● 공휴일</span></div>
-        <div class="weekdays"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>
+        <div class="calendar-header">
+          <div class="month-nav"><button aria-label="이전 달" id="prevMonth">‹</button>
+            <h2 id="monthTitle"></h2><button aria-label="다음 달" id="nextMonth">›</button>
+          </div><span class="holiday-key">● 공휴일</span>
+        </div>
+        <div class="weekdays">
+          <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>
         <div class="calendar" id="calendar"></div>
       </div>
       <aside class="side-column">
-        <section class="panel daily-view"><div class="side-heading"><div><p class="eyebrow">날짜별 수업 보기</p><h2 id="dailyTitle">오늘의 수업</h2></div><button class="tiny-today" id="scheduleToday">오늘</button></div><div id="dayTabsContainer" class="day-tabs-container"></div><div class="date-picker"><input id="scheduleDate" type="date" aria-label="확인할 날짜" /></div><div id="dailySchedule" class="daily-schedule"></div><div id="dailyTasks" class="daily-tasks"></div></section>
-        <section class="panel upcoming"><div class="side-heading"><div><p class="eyebrow">다가오는 일정</p><h2>이번 달 할 일</h2></div><span id="openCount" class="count"></span></div><div id="upcomingList" class="upcoming-list"></div></section>
+        <section class="panel daily-view">
+          <div class="side-heading">
+            <div>
+              <p class="eyebrow">날짜별 수업 보기</p>
+              <h2 id="dailyTitle">오늘의 수업</h2>
+            </div><button class="tiny-today" id="scheduleToday">오늘</button>
+          </div>
+          <div class="date-picker"><input id="scheduleDate" type="date" aria-label="확인할 날짜" /></div>
+          <div id="dailySchedule" class="daily-schedule"></div>
+          <div id="dailyTasks" class="daily-tasks"></div>
+        </section>
+        <section class="panel upcoming">
+          <div class="side-heading">
+            <div>
+              <p class="eyebrow">다가오는 일정</p>
+              <h2>이번 달 할 일</h2>
+            </div><span id="openCount" class="count"></span>
+          </div>
+          <div id="upcomingList" class="upcoming-list"></div>
+        </section>
         <section class="panel timetable">
           <div class="side-heading">
-            <div><p class="eyebrow">자동 과목 찾기</p><h2>1학년 2학기 시간표</h2></div>
+            <div>
+              <p class="eyebrow">자동 과목 찾기</p>
+              <h2>1학년 2학기 시간표</h2>
+            </div>
             <div class="timetable-actions" id="timetableAdminActions">
-              <button type="button" class="tiny-btn" id="editDefaultTimetableBtn" style="display:none;">✏️ 기본 시간표</button>
+              <button type="button" class="tiny-btn" id="editDefaultTimetableBtn" style="display:none;">✏️ 기본
+                시간표</button>
               <button type="button" class="tiny-btn" id="editDateTimetableBtn" style="display:none;">📅 날짜별 변경</button>
             </div>
           </div>
           <div id="timetableList"></div>
           <div class="default-locations-panel" id="defaultLocationsPanel">
             <div class="side-heading" style="margin-top:28px; margin-bottom:12px;">
-              <div><p class="eyebrow">장소 관리</p><h3>과목별 기본 장소</h3></div>
+              <div>
+                <p class="eyebrow">장소 관리</p>
+                <h3>과목별 기본 장소</h3>
+              </div>
             </div>
             <div id="defaultLocationsList" class="default-locations-grid"></div>
           </div>
@@ -52,17 +90,51 @@
   </main>
   <dialog id="entryDialog">
     <form id="entryForm" method="dialog">
-      <div class="dialog-title"><div><p class="eyebrow" id="formEyebrow">새 일정</p><h2 id="formTitle">수행평가·과제 추가</h2></div><button type="button" class="close" id="closeDialog">×</button></div>
+      <div class="dialog-title">
+        <div>
+          <p class="eyebrow" id="formEyebrow">새 일정</p>
+          <h2 id="formTitle">수행평가·과제 추가</h2>
+        </div><button type="button" class="close" id="closeDialog">×</button>
+      </div>
       <input type="hidden" id="entryId" />
-      <div class="form-grid"><label class="wide">제목<input id="title" required maxlength="80" placeholder="예: 통합사회 발표 자료 제출" /></label><label>구분<select id="type"><option>수행평가</option><option selected>과제</option><option>시험</option><option>기타</option></select></label><label>날짜<input id="date" type="date" required /></label><label>교시<select id="period"><option value="">교시 없음</option><option value="1">1교시</option><option value="2">2교시</option><option value="3">3교시</option><option value="4">4교시</option><option value="5">5교시</option><option value="6">6교시</option><option value="7">7교시</option></select></label><label>과목<input id="subject" list="subjects" maxlength="40" placeholder="교시를 고르면 자동 입력" /><datalist id="subjects"></datalist></label><label class="wide">메모<textarea id="description" rows="3" maxlength="500" placeholder="준비물, 범위, 제출 방법 등을 적어두세요."></textarea></label><label class="wide image-field">사진 첨부 <input id="image" type="file" accept="image/*" /><small>1.5MB 이하 · 이 브라우저에 저장됩니다</small><div id="imagePreview"></div></label></div>
-      <div class="dialog-actions"><button type="button" class="danger" id="deleteBtn" hidden>삭제</button><span></span><button type="button" class="secondary" id="cancelBtn">취소</button><button class="primary" id="saveBtn">저장</button></div>
+      <div class="form-grid"><label class="wide">제목<input id="title" required maxlength="80"
+            placeholder="예: 통합사회 발표 자료 제출" /></label><label>구분<select id="type">
+            <option>수행평가</option>
+            <option selected>과제</option>
+            <option>시험</option>
+            <option>기타</option>
+          </select></label><label>날짜<input id="date" type="date" required /></label><label>교시<select id="period">
+            <option value="">교시 없음</option>
+            <option value="1">1교시</option>
+            <option value="2">2교시</option>
+            <option value="3">3교시</option>
+            <option value="4">4교시</option>
+            <option value="5">5교시</option>
+            <option value="6">6교시</option>
+            <option value="7">7교시</option>
+          </select></label><label>과목<input id="subject" list="subjects" maxlength="40"
+            placeholder="교시를 고르면 자동 입력" /><datalist id="subjects"></datalist></label><label class="wide">메모<textarea
+            id="description" rows="3" maxlength="500" placeholder="준비물, 범위, 제출 방법 등을 적어두세요."></textarea></label><label
+          class="wide image-field">사진 첨부 <input id="image" type="file" accept="image/*" /><small>1.5MB 이하 · 이 브라우저에
+            저장됩니다</small>
+          <div id="imagePreview"></div>
+        </label></div>
+      <div class="dialog-actions"><button type="button" class="danger" id="deleteBtn"
+          hidden>삭제</button><span></span><button type="button" class="secondary" id="cancelBtn">취소</button><button
+          class="primary" id="saveBtn">저장</button></div>
     </form>
   </dialog>
   <dialog id="locationDialog">
     <form id="locationForm" method="dialog">
-      <div class="dialog-title"><div><p class="eyebrow" id="locDialogEyebrow">수업 장소 변경</p><h2 id="locDialogTitle">수업 장소 변경</h2></div><button type="button" class="close" id="closeLocDialog">×</button></div>
+      <div class="dialog-title">
+        <div>
+          <p class="eyebrow" id="locDialogEyebrow">수업 장소 변경</p>
+          <h2 id="locDialogTitle">수업 장소 변경</h2>
+        </div><button type="button" class="close" id="closeLocDialog">×</button>
+      </div>
       <div class="form-grid">
-        <label class="wide">해당 날짜 수업 장소<input id="locDialogInput" placeholder="예: 1-3, 과학실, 체육관" maxlength="50" /></label>
+        <label class="wide">해당 날짜 수업 장소<input id="locDialogInput" placeholder="예: 1-3, 과학실, 체육관"
+            maxlength="50" /></label>
         <div class="loc-default-info wide" id="locDefaultInfo">과목 기본 장소: <strong id="locDefaultVal">없음</strong></div>
       </div>
       <div class="dialog-actions">
@@ -74,9 +146,16 @@
   </dialog>
   <dialog id="defaultTimetableDialog" class="wide-dialog">
     <form id="defaultTimetableForm" method="dialog">
-      <div class="dialog-title"><div><p class="eyebrow">시간표 관리</p><h2>기본 시간표 편집</h2></div><button type="button" class="close" id="closeDefaultTimetableDialog">×</button></div>
+      <div class="dialog-title">
+        <div>
+          <p class="eyebrow">시간표 관리</p>
+          <h2>기본 시간표 편집</h2>
+        </div><button type="button" class="close" id="closeDefaultTimetableDialog">×</button>
+      </div>
       <p class="dialog-desc">매주 정규 수업으로 진행되는 기본 시간표를 설정합니다. (월~금, 1~7교시)</p>
-      <div class="timetable-edit-wrapper"><div id="defaultTimetableEditGrid" class="timetable-edit-grid"></div></div>
+      <div class="timetable-edit-wrapper">
+        <div id="defaultTimetableEditGrid" class="timetable-edit-grid"></div>
+      </div>
       <div class="dialog-actions">
         <button type="button" class="secondary" id="cancelDefaultTimetableBtn">취소</button>
         <button class="primary" id="saveDefaultTimetableBtn">저장</button>
@@ -85,12 +164,19 @@
   </dialog>
   <dialog id="dateTimetableDialog" class="wide-dialog">
     <form id="dateTimetableForm" method="dialog">
-      <div class="dialog-title"><div><p class="eyebrow">시간표 관리</p><h2>특정 날짜 시간표 변경</h2></div><button type="button" class="close" id="closeDateTimetableDialog">×</button></div>
+      <div class="dialog-title">
+        <div>
+          <p class="eyebrow">시간표 관리</p>
+          <h2>특정 날짜 시간표 변경</h2>
+        </div><button type="button" class="close" id="closeDateTimetableDialog">×</button>
+      </div>
       <div class="form-grid" style="margin-bottom:12px;">
         <label class="wide">변경할 날짜<input type="date" id="overrideDateInput" required /></label>
       </div>
       <p class="dialog-desc" id="overrideDateNotice">해당 날짜의 교시별 과목 및 담당 선생님을 변경합니다. (입력 안 함 = 기본 시간표 사용)</p>
-      <div class="timetable-edit-wrapper"><div id="dateTimetableEditGrid" class="date-timetable-edit-grid"></div></div>
+      <div class="timetable-edit-wrapper">
+        <div id="dateTimetableEditGrid" class="date-timetable-edit-grid"></div>
+      </div>
       <div class="dialog-actions">
         <button type="button" class="danger" id="resetDateTimetableBtn">이 날짜 변경 초기화</button><span></span>
         <button type="button" class="secondary" id="cancelDateTimetableBtn">취소</button>
@@ -101,4 +187,5 @@
   <div id="toast" role="status"></div>
   <script src="app.js"></script>
 </body>
+
 </html>
