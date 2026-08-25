@@ -13,7 +13,7 @@ if (window.supabase && SUPABASE_URL && !SUPABASE_URL.includes('YOUR_SUPABASE')) 
 }
 
 // 등록 권한 비밀번호 (하드코딩)
-const ADMIN_PASSWORD = '7777';
+const ADMIN_PASSWORD = '2010';
 let isAdmin = localStorage.getItem('school_planner_is_admin') === 'true';
 
 // 기본 시간표 및 교사 정보 (Supabase 데이터 미존재 시 초기 시드용)
@@ -726,15 +726,15 @@ function renderDailyView() {
             ${periodTasks.length ? `
               <div class="daily-period-tasks">
                 ${periodTasks.map(item => {
-                  const iconMap = { '수행평가': '📝', '과제': '📌', '시험': '✏️', '기타': '🏷️' };
-                  const icon = iconMap[item.type] || '📌';
-                  return `
+        const iconMap = { '수행평가': '📝', '과제': '📌', '시험': '✏️', '기타': '🏷️' };
+        const icon = iconMap[item.type] || '📌';
+        return `
                     <div class="period-task-chip type-${item.type || '과제'}" data-id="${item.id}" title="클릭하여 일정 상세 보기">
                       <span class="task-chip-badge">${icon} ${escape(item.type || '과제')}</span>
                       <span class="task-chip-title">${escape(item.title)}</span>
                     </div>
                   `;
-                }).join('')}
+      }).join('')}
               </div>
             ` : ''}
           </div>
@@ -783,15 +783,16 @@ function renderTimetable() {
   const todayStr = fmtDate(new Date());
 
   const daysLabel = ['월', '화', '수', '목', '금'];
-  
+
   const headerHtml = `<div class="schedule-header">` +
+    `<span class="schedule-header-period-spacer">교시</span>` +
     daysLabel.map((dayName, idx) => {
       const iso = weekDates[idx];
       const [, m, d] = iso.split('-');
       const isToday = (iso === todayStr);
-      return `<span class="${isToday ? 'is-today' : ''}">${dayName}<small>(${Number(m)}/${Number(d)})</small></span>`;
+      return `<span class="schedule-header-day ${isToday ? 'is-today' : ''}">${dayName}<small>(${Number(m)}/${Number(d)})</small></span>`;
     }).join('') +
-  `</div>`;
+    `</div>`;
 
   const rowsHtml = Object.keys(dbSchedule).map(periodStr => {
     const period = Number(periodStr);
@@ -804,33 +805,36 @@ function renderTimetable() {
       const isLocOverride = isDateOverride(isoDate, period);
       const isToday = (isoDate === todayStr);
 
-      const cellBg = subjectColors[subject] || 'transparent';
+      const subjColor = subjectColors[subject] || '#bdc3ce';
       const classes = [
         'schedule-cell',
         lesson.isOverride ? 'has-override' : '',
-        isToday ? 'is-today' : ''
+        isToday ? 'is-today' : '',
+        (!subject && !teacher) ? 'empty-cell' : ''
       ].filter(Boolean).join(' ');
 
+      const titleAttr = `${escape(subject || '수업')}${teacher ? ' (' + escape(teacher) + ' 선생님)' : ''}${lesson.isOverride ? ' [⏰ 시간표 변경됨]' : ''}${loc ? ' [📍 ' + escape(loc) + ']' : ''}`;
+
       return `
-        <span class="${classes}" title="${escape(subject)}${teacher ? ' (' + escape(teacher) + ' 선생님)' : ''}${lesson.isOverride ? ' [⏰ 시간표 변경됨]' : ''}" style="background:${cellBg}">
+        <div class="${classes}" title="${titleAttr}" style="border-left-color:${subjColor}">
           ${lesson.isOverride ? `<small class="schedule-override-tag">🔄 변경</small>` : ''}
           <span class="schedule-cell-subject">${escape(subject || '—')}</span>
-          ${teacher ? `<small class="schedule-cell-teacher">${escape(teacher)}</small>` : ''}
+          ${teacher ? `<small class="schedule-cell-teacher">${escape(teacher)} 선생님</small>` : ''}
           ${loc ? `<small class="schedule-loc-tag ${isLocOverride ? 'override' : ''}">📍 ${escape(loc)}</small>` : ''}
-        </span>
+        </div>
       `;
     }).join('');
 
     return `
       <div class="schedule-row">
-        <span class="schedule-period">${period}</span>
-        <div class="schedule-subjects">${cellsHtml}</div>
+        <span class="schedule-period">${period}교시</span>
+        ${cellsHtml}
       </div>
     `;
   }).join('');
 
-  container.innerHTML = headerHtml + rowsHtml;
-  
+  container.innerHTML = `<div class="timetable-scroll-wrapper">${headerHtml}${rowsHtml}</div>`;
+
   if ($('subjects')) {
     $('subjects').innerHTML = Object.keys(subjectColors).map(subject => `<option value="${subject}">`).join('');
   }
@@ -986,6 +990,23 @@ function openDateTimetableDialog(isoDate = '') {
 function previewImage(src) { $('imagePreview').innerHTML = src ? `<img alt="첨부 사진 미리보기" src="${src}">` : ''; }
 function getFileAsData(file) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); }); }
 
+function goToTodayView() {
+  $('plannerGrid').className = 'planner-grid view-today';
+  document.querySelectorAll('.view-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.view === 'today'));
+  const now = new Date();
+  selectedDate = now;
+  $('scheduleDate').value = fmtDate(now);
+  renderCalendar();
+  renderDailyView();
+}
+
+if ($('brandBtn')) {
+  $('brandBtn').addEventListener('click', (e) => {
+    e.preventDefault();
+    goToTodayView();
+  });
+}
+
 if ($('authBtn')) $('authBtn').onclick = handleAuthToggle;
 if ($('editDefaultTimetableBtn')) $('editDefaultTimetableBtn').onclick = () => openDefaultTimetableDialog();
 if ($('editDateTimetableBtn')) $('editDateTimetableBtn').onclick = () => openDateTimetableDialog();
@@ -994,13 +1015,14 @@ $('prevMonth').onclick = () => { selectedDate = new Date(selectedDate.getFullYea
 $('nextMonth').onclick = () => { selectedDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 1); render(); };
 document.querySelectorAll('.view-tab').forEach(button => button.addEventListener('click', () => {
   const view = button.dataset.view;
-  $('plannerGrid').className = `planner-grid view-${view}`;
-  document.querySelectorAll('.view-tab').forEach(tab => tab.classList.toggle('active', tab === button));
   if (view === 'today') {
-    $('scheduleDate').value = fmtDate(new Date());
-    renderDailyView();
-  } else if (view === 'timetable') {
-    renderTimetable();
+    goToTodayView();
+  } else {
+    $('plannerGrid').className = `planner-grid view-${view}`;
+    document.querySelectorAll('.view-tab').forEach(tab => tab.classList.toggle('active', tab === button));
+    if (view === 'timetable') {
+      renderTimetable();
+    }
   }
 }));
 $('scheduleToday').onclick = () => { $('scheduleDate').value = fmtDate(new Date()); renderDailyView(); };
