@@ -633,7 +633,7 @@ async function deleteItem(id) {
   await loadAllData();
 }
 
-function render() { renderCalendar(); renderUpcoming(); renderTodayStatus(); renderDailyView(); renderTimetable(); }
+function render() { renderCalendar(); renderUpcoming(); renderTodayStatus(); renderDayTabs(); renderDailyView(); renderTimetable(); }
 function renderTodayStatus() { $('todayStatus').textContent = items.filter(item => item.date === fmtDate(new Date())).length ? '오늘 일정이 있어요.' : '오늘 일정은 아직 없어요'; }
 function renderCalendar() {
   const y = selectedDate.getFullYear(), m = selectedDate.getMonth(); $('monthTitle').textContent = `${y}년 ${m + 1}월`;
@@ -663,6 +663,47 @@ function renderUpcoming() {
       <div class="task-meta">${dateText(item.date)}${item.period ? ' · ' + item.period + '교시' : ''}</div>
     </article>`;
   }).join('');
+}
+
+// 오늘이 속한 주의 dow번째 요일 ISO 날짜 반환 (dow: 1=월..5=금)
+function getWeekDateForDow(dow) {
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+  const day = today.getDay(); // 0=일, 1=월...6=토
+  const diffToMon = (day === 0 ? -6 : 1 - day);
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + diffToMon);
+  const result = new Date(monday);
+  result.setDate(monday.getDate() + (dow - 1));
+  return fmtDate(result);
+}
+
+// 요일 탭 (월~금) 렌더
+function renderDayTabs() {
+  const container = $('dayTabsContainer');
+  if (!container) return;
+  const days = ['월', '화', '수', '목', '금'];
+  const currentVal = $('scheduleDate') ? $('scheduleDate').value : '';
+  // scheduleDate의 요일을 읽어 active 탭 결정
+  const currentDow = currentVal
+    ? new Date(`${currentVal}T12:00:00`).getDay()
+    : new Date().getDay();
+
+  container.innerHTML = days.map((label, idx) => {
+    const dow = idx + 1; // 1=월, 2=화, ..., 5=금
+    const isActive = (dow === currentDow);
+    const iso = getWeekDateForDow(dow);
+    return `<button class="day-tab${isActive ? ' active' : ''}" data-dow="${dow}" data-iso="${iso}">${label}</button>`;
+  }).join('');
+
+  container.querySelectorAll('.day-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const iso = btn.dataset.iso;
+      if ($('scheduleDate')) $('scheduleDate').value = iso;
+      renderDayTabs();
+      renderDailyView();
+    });
+  });
 }
 
 function renderDailyView() {
@@ -721,7 +762,7 @@ function renderDailyView() {
                 <span class="daily-subject-title">${escape(subject || '수업')}</span>
                 <small class="daily-teacher-info">${teacher ? escape(teacher) + ' 선생님' : '담당 선생님'}${lesson.isOverride ? ` <span class="lesson-override-badge">⏰ 시간표 변경</span>` : ''}${loc ? ` <span class="daily-loc-badge ${isLocOverride ? 'override' : ''}">📍 ${escape(loc)}</span>` : ''}</small>
               </div>
-              ${isAdmin ? `<button type="button" class="tiny-loc-btn" data-date="${iso}" data-period="${pNum}" data-subject="${escape(subject)}" title="해당 날짜 장소 변경">📍 장소 변경</button>` : ''}
+              ${isAdmin ? `<div class="tiny-btn-group"><button type="button" class="tiny-loc-btn" data-date="${iso}" data-period="${pNum}" data-subject="${escape(subject)}" title="해당 날짜 장소 변경">📍 장소 변경</button><button type="button" class="tiny-add-btn" data-date="${iso}" data-period="${pNum}" data-subject="${escape(subject)}" title="${pNum}교시 일정 추가">＋ 일정 추가</button></div>` : ''}
             </div>
             ${periodTasks.length ? `
               <div class="daily-period-tasks">
@@ -746,7 +787,7 @@ function renderDailyView() {
   // Priority 3: Unlinked items
   const unlinkedItems = dayItems.filter(item => !linkedItemIds.has(item.id));
   if (unlinkedItems.length) {
-    $('dailyTasks').innerHTML = `<h3>오늘의 기타 / 교시 미지정 수행평가 · 과제</h3>${unlinkedItems.map(item => `
+    $('dailyTasks').innerHTML = `<h3>기타 / 교시 미지정 수행평가 · 과제</h3>${unlinkedItems.map(item => `
       <div class="daily-task" data-id="${item.id}" title="클릭하여 일정 상세 보기">
         ${item.period ? item.period + '교시 · ' : ''}${item.subject ? '[' + escape(item.subject) + '] ' : ''}${escape(item.title)}
       </div>
@@ -816,7 +857,7 @@ function renderTimetable() {
       const titleAttr = `${escape(subject || '수업')}${teacher ? ' (' + escape(teacher) + ' 선생님)' : ''}${lesson.isOverride ? ' [⏰ 시간표 변경됨]' : ''}${loc ? ' [📍 ' + escape(loc) + ']' : ''}`;
 
       return `
-        <div class="${classes}" title="${titleAttr}" style="border-left-color:${subjColor}">
+        <div class="${classes}" title="${titleAttr}" style="border-left-color:${subjColor}" data-date="${isoDate}" data-period="${period}">
           ${lesson.isOverride ? `<small class="schedule-override-tag">🔄 변경</small>` : ''}
           <span class="schedule-cell-subject">${escape(subject || '—')}</span>
           ${teacher ? `<small class="schedule-cell-teacher">${escape(teacher)} 선생님</small>` : ''}
@@ -997,6 +1038,7 @@ function goToTodayView() {
   selectedDate = now;
   $('scheduleDate').value = fmtDate(now);
   renderCalendar();
+  renderDayTabs();
   renderDailyView();
 }
 
@@ -1025,15 +1067,24 @@ document.querySelectorAll('.view-tab').forEach(button => button.addEventListener
     }
   }
 }));
-$('scheduleToday').onclick = () => { $('scheduleDate').value = fmtDate(new Date()); renderDailyView(); };
-$('scheduleDate').addEventListener('change', renderDailyView);
+$('scheduleToday').onclick = () => { $('scheduleDate').value = fmtDate(new Date()); renderDayTabs(); renderDailyView(); };
+$('scheduleDate').addEventListener('change', () => { renderDayTabs(); renderDailyView(); });
 $('dailySchedule').addEventListener('click', event => {
+  // [＋ 일정 추가] 버튼 클릭
+  const addBtn = event.target.closest('.tiny-add-btn');
+  if (addBtn) {
+    const { date, period } = addBtn.dataset;
+    openNew(date, period);
+    return;
+  }
+  // 📍 장소 변경 버튼 클릭
   const btn = event.target.closest('.tiny-loc-btn');
   if (btn) {
     const { date, period, subject } = btn.dataset;
     openLocationDialog(date, period, subject);
     return;
   }
+  // 일정 칩 클릭 (상세 보기)
   const task = event.target.closest('[data-id]');
   if (task) {
     openEdit(task.dataset.id);
@@ -1140,9 +1191,20 @@ if ($('resetDateTimetableBtn')) {
 if ($('closeDateTimetableDialog')) $('closeDateTimetableDialog').onclick = () => $('dateTimetableDialog').close();
 if ($('cancelDateTimetableBtn')) $('cancelDateTimetableBtn').onclick = () => $('dateTimetableDialog').close();
 
+// 시간표 셀 클릭 → 일정 추가 모달 (빈 셀 제외)
+if ($('timetableList')) {
+  $('timetableList').addEventListener('click', event => {
+    const cell = event.target.closest('.schedule-cell:not(.empty-cell)');
+    if (cell && cell.dataset.date && cell.dataset.period) {
+      openNew(cell.dataset.date, cell.dataset.period);
+    }
+  });
+}
+
 const now = new Date();
 $('todayLabel').textContent = new Intl.DateTimeFormat('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' }).format(now);
 $('scheduleDate').value = fmtDate(now);
+renderDayTabs(); // 요일 탭 초기 렌더
 updateAuthUI();
 loadAllData().then(() => {
   setupRealtime();
