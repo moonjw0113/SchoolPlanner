@@ -706,10 +706,12 @@ function renderCalendar() {
 }
 function renderUpcoming() {
   const monthPrefix = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}`;
-  const monthItems = items.filter(item => item.date.startsWith(monthPrefix)).sort((a, b) => a.date.localeCompare(b.date) || Number(a.period || 99) - Number(b.period || 99));
+  const today = fmtDate(new Date());
+  // 이미 지난 일정은 빼고 오늘 이후 일정만 보여준다. (ISO 날짜라 문자열 비교로 충분)
+  const monthItems = items.filter(item => item.date.startsWith(monthPrefix) && item.date >= today).sort((a, b) => a.date.localeCompare(b.date) || Number(a.period || 99) - Number(b.period || 99));
   $('openCount').textContent = `${monthItems.length}개 일정`;
   if (!monthItems.length) {
-    $('upcomingList').innerHTML = '<p class="nothing">이번 달 일정이 없어요.</p>';
+    $('upcomingList').innerHTML = '<p class="nothing">이번 달 남은 일정이 없어요.</p>';
     return;
   }
   $('upcomingList').innerHTML = monthItems.slice(0, 8).map(item => {
