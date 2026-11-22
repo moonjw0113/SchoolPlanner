@@ -1,17 +1,17 @@
 # 학교 플래너 (수행평가 · 과제 관리)
 
 종촌고등학교 1학년 7반의 2학기 시간표를 기반으로 수행평가와 과제를 달력 및 시간표 뷰에서 통합 관리하는 웹앱입니다.
-**Supabase 데이터베이스 연동** 및 **등록 비밀번호 기반 권한 제어**가 포함되어 있습니다.
+**Supabase 데이터베이스 연동** 및 **Supabase 로그인 기반 관리자 권한**가 포함되어 있습니다.
 
 ---
 
 ## 🌟 주요 기능
 
-1. **권한 구분 (일반 사용자 vs 등록 권한 사용자)**
-   - **일반 사용자 (기본)**: 사이트 접속, 수행평가/과제 날짜별 정리 조회, 사진 및 메모 확인 (등록/수정/삭제 제한)
-   - **등록 권한 사용자**: 상단 `🔑 등록 권한` 버튼 클릭 후 비밀번호 입력 시 일정 추가·수정·삭제 가능 (로그인 상태는 새로고침 후에도 유지)
-2. **Supabase 연동**: 등록한 일정을 온라인 데이터베이스에 안전하게 보관 (모든 접속자가 공유)
-3. **사진 첨부 지원**: 1.5MB 이하 사진 첨부 및 DataURL 기반 저장/미리보기
+1. **권한 구분 (일반 사용자 vs 관리자)**
+   - **일반 사용자 (기본)**: 수행평가/과제 날짜별 정리 조회, 사진 및 메모 확인 (등록/수정/삭제 불가)
+   - **관리자**: 상단 `🔑 관리자 로그인` 버튼으로 Supabase 계정에 로그인하면 일정과 시간표를 추가·수정·삭제할 수 있다. 권한은 DB의 RLS 정책이 검사하므로 화면을 조작해도 우회할 수 없다.
+2. **Supabase 연동**: 등록한 일정을 온라인 데이터베이스에 보관 (모든 접속자가 공유, Realtime 반영)
+3. **사진 첨부 지원**: 1.5MB 이하 사진을 DataURL로 저장. 목록에서는 사진을 빼고 불러오고, 일정을 열 때만 사진을 받는다.
 4. **자동 과목 입력**: 종촌고 1-7 시간표 기반으로 교시 선택 시 과목 및 담당 교사 자동 연결
 5. **2026 공휴일 및 달력 뷰**: 대한민국 공휴일 자동 표시 및 일별/월별 할 일 보기
 
@@ -20,10 +20,9 @@
 ## 🛠️ Supabase 데이터베이스 연결 방법
 
 1. [Supabase](https://supabase.com)에 로그인 후 새 프로젝트를 생성합니다.
-2. **SQL Editor**로 이동하여 아래 SQL 문을 복사하여 실행합니다. (테이블 생성, RLS 권한 설정 및 Realtime 활성화)
+2. **SQL Editor**에서 아래 테이블 생성 SQL을 실행합니다.
 
 ```sql
--- 1. 수행평가 및 과제 테이블
 create table if not exists assessments (
   id text primary key,
   title text not null,
@@ -38,7 +37,6 @@ create table if not exists assessments (
   updated_at timestamptz default now()
 );
 
--- 2. 시간표 테이블 (정규 요일/교시 시간표)
 create table if not exists timetable (
   id text primary key,
   period integer not null,
@@ -49,14 +47,12 @@ create table if not exists timetable (
   updated_at timestamptz default now()
 );
 
--- 3. 과목별 기본 장소 테이블
 create table if not exists subject_locations (
   subject text primary key,
   default_location text default '',
   updated_at timestamptz default now()
 );
 
--- 4. 특정 날짜 장소 변경 테이블
 create table if not exists timetable_location_overrides (
   id text primary key,
   date text not null,
@@ -64,46 +60,33 @@ create table if not exists timetable_location_overrides (
   location text default '',
   updated_at timestamptz default now()
 );
-
--- Row Level Security (RLS) 활성화
-alter table assessments enable row level security;
-alter table timetable enable row level security;
-alter table subject_locations enable row level security;
-alter table timetable_location_overrides enable row level security;
-
--- 조회/수정 정책 설정 (클라이언트 비밀번호 7777 권한 제어와 연동)
-create policy "Allow all access to assessments" on assessments for all using (true) with check (true);
-create policy "Allow all access to timetable" on timetable for all using (true) with check (true);
-create policy "Allow all access to subject_locations" on subject_locations for all using (true) with check (true);
-create policy "Allow all access to timetable_location_overrides" on timetable_location_overrides for all using (true) with check (true);
-
--- ⚡ Supabase Realtime (Postgres Changes) 활성화
-alter publication supabase_realtime add table assessments;
-alter publication supabase_realtime add table timetable;
-alter publication supabase_realtime add table subject_locations;
-alter publication supabase_realtime add table timetable_location_overrides;
 ```
 
-> **참고 (Realtime 대시보드 설정)**:
-> SQL 구문 실행 외에도 Supabase 대시보드의 **Database -> Publications -> `supabase_realtime`** 메뉴에서 해당 테이블들의 INSERT, UPDATE, DELETE 토글을 직접 활성화하실 수도 있습니다.
+3. 이어서 [`supabase/security-migration.sql`](supabase/security-migration.sql) 전체를 실행합니다. 이 파일이 하는 일:
+   - `timetable_overrides`(날짜별 시간표 변경) 테이블과 `admins`(관리자 목록) 테이블 생성
+   - 모든 테이블에 "조회는 누구나, 쓰기는 관리자만" RLS 정책 적용 (기존 정책은 삭제)
+   - Realtime 구독 대상 등록
 
-3. Supabase 프로젝트의 **Project Settings -> API**에서 `Project URL`과 `anon public key`를 복사합니다.
-4. [`app.js`](file:///c:/Users/MoonJunWoo/Desktop/school-planner/app.js) 상단의 변수를 수정합니다:
+   이미 운영 중인 DB도 이 파일만 한 번 실행하면 됩니다. 여러 번 실행해도 안전합니다.
 
-```javascript
-const SUPABASE_URL = 'https://your-project.supabase.co';
-const SUPABASE_ANON_KEY = 'your-anon-key';
-```
+4. Supabase 프로젝트의 **Project Settings → API**에서 `Project URL`과 공개용(publishable/anon) 키를 복사해 `app.js` 상단의 `SUPABASE_URL`, `SUPABASE_ANON_KEY`에 넣습니다. 이 키는 공개돼도 되는 키입니다. `service_role` 키는 절대 넣지 마세요.
 
 ---
 
-## 🔑 등록 비밀번호 변경 방법
+## 🔑 관리자 계정 만들기
 
-[`app.js`](file:///c:/Users/MoonJunWoo/Desktop/school-planner/app.js) 파일 상단의 `ADMIN_PASSWORD` 상수를 원하는 비밀번호로 변경할 수 있습니다 (기본값: `7777`).
+예전의 공용 비밀번호 방식은 없어졌습니다. 관리자는 Supabase 계정으로 로그인합니다.
 
-```javascript
-const ADMIN_PASSWORD = '7777'; // 원하는 비밀번호로 수정
+1. Supabase 대시보드 **Authentication → Users → Add user**에서 이메일과 비밀번호로 계정을 만듭니다. (**Auto Confirm User** 체크)
+2. **SQL Editor**에서 이메일을 바꿔 실행합니다.
+
+```sql
+insert into admins (user_id) select id from auth.users where email = 'admin@example.com';
 ```
+
+3. 다른 사람이 계정을 만들지 못하게 **Authentication → Sign In / Providers → Email**에서 **Allow new users to sign up**을 끕니다. (꺼 두지 않아도 `admins`에 없는 계정은 쓰기 권한이 없습니다.)
+
+관리자를 빼려면 `delete from admins where user_id = ...;`를 실행합니다.
 
 ---
 
