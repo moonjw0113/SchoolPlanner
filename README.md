@@ -14,6 +14,7 @@
 3. **사진 첨부 지원**: 1.5MB 이하 사진을 DataURL로 저장. 목록에서는 사진을 빼고 불러오고, 일정을 열 때만 사진을 받는다.
 4. **자동 과목 입력**: 종촌고 1-7 시간표 기반으로 교시 선택 시 과목 및 담당 교사 자동 연결
 5. **2026 공휴일 및 달력 뷰**: 대한민국 공휴일 자동 표시 및 일별/월별 할 일 보기
+6. **AI 일정 추가**: 알림장·칠판·공지 사진을 올리면 Claude가 날짜와 내용을 정리한다. 확실하지 않은 부분은 질문으로 표시하고, 관리자가 확인·수정한 뒤 저장한다. 직접 입력과 수정 기능도 그대로 쓸 수 있다.
 
 ---
 
@@ -87,6 +88,22 @@ insert into admins (user_id) select id from auth.users where email = 'admin@exam
 3. 다른 사람이 계정을 만들지 못하게 **Authentication → Sign In / Providers → Email**에서 **Allow new users to sign up**을 끕니다. (꺼 두지 않아도 `admins`에 없는 계정은 쓰기 권한이 없습니다.)
 
 관리자를 빼려면 `delete from admins where user_id = ...;`를 실행합니다.
+
+---
+
+## 🤖 AI 일정 추가 설정
+
+`+ 일정 추가`는 사진을 Supabase Edge Function(`analyze-schedule`)으로 보내고, 이 함수가 Claude API로 사진을 분석합니다. API 키는 Supabase 안에만 보관되고 웹페이지에는 들어가지 않습니다.
+
+1. [Claude Console](https://platform.claude.com/)에서 API 키를 만들고 결제 수단을 등록합니다. (사진 한 장 분석에 대략 몇십 원 정도 듭니다.)
+2. Supabase 대시보드 **Edge Functions → Secrets**에서 `ANTHROPIC_API_KEY` 이름으로 API 키를 저장합니다.
+3. **Edge Functions → Deploy a new function → Via Editor**를 누르고, 함수 이름을 `analyze-schedule`로 정한 뒤 [`supabase/functions/analyze-schedule/index.ts`](supabase/functions/analyze-schedule/index.ts) 내용을 그대로 붙여 넣고 **Deploy**합니다.
+   - Supabase CLI를 쓴다면 `supabase functions deploy analyze-schedule`로도 됩니다.
+4. 사이트에서 관리자로 로그인하고 `+ 일정 추가` → 사진 선택 → **분석하기**를 눌러 확인합니다.
+
+분석할 때 `Invalid JWT` 오류가 나면 함수 설정의 **Verify JWT with legacy secret**(또는 **Enforce JWT Verification**)을 끄세요. 함수 안에서 로그인 토큰으로 관리자 여부를 직접 확인하므로 꺼도 안전합니다.
+
+함수는 관리자(`admins`에 등록된 계정)만 호출할 수 있고, DB에는 직접 쓰지 않습니다. 분석 결과는 화면에서 확인한 뒤에 저장됩니다. 함수 설정이 안 됐거나 분석이 실패하면 **직접 입력하기**로 기존 입력 창을 쓸 수 있습니다.
 
 ---
 
