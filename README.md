@@ -14,7 +14,7 @@
 3. **사진 첨부 지원**: 1.5MB 이하 사진을 DataURL로 저장. 목록에서는 사진을 빼고 불러오고, 일정을 열 때만 사진을 받는다.
 4. **자동 과목 입력**: 종촌고 1-7 시간표 기반으로 교시 선택 시 과목 및 담당 교사 자동 연결
 5. **2026 공휴일 및 달력 뷰**: 대한민국 공휴일 자동 표시 및 일별/월별 할 일 보기
-6. **Claude 커넥터**: claude.ai 대화에 알림장·공지 사진을 올리면 Claude가 일정을 정리하고, 확인을 받은 뒤 플래너에 바로 저장한다. (API 키 불필요)
+6. **Claude로 일정 넣기**: claude.ai에 Supabase 공식 커넥터를 연결하고 알림장·공지 사진을 올리면, Claude가 일정을 정리해 확인을 받은 뒤 DB에 저장한다. (API 키 불필요)
 
 ---
 
@@ -91,44 +91,39 @@ insert into admins (user_id) select id from auth.users where email = 'admin@exam
 
 ---
 
-## 🤖 Claude 커넥터 (사진으로 일정 추가)
+## 🤖 Claude로 사진 속 일정 넣기 (Supabase 공식 커넥터)
 
-claude.ai 대화에서 사진을 올리고 "이 일정 플래너에 넣어 줘"라고 하면, Claude가 사진을 읽고 플래너 커넥터(MCP 서버)로 일정을 저장합니다. 웹앱은 AI API를 부르지 않으므로 API 키나 사용료가 필요 없습니다. (claude.ai 요금제에 따라 사용자 지정 커넥터를 추가할 수 있는 개수가 다를 수 있습니다.)
+claude.ai에 Supabase 공식 커넥터를 연결하면 Claude가 SQL로 `assessments` 테이블에 일정을 바로 넣습니다. 사이트는 Realtime으로 자동 반영됩니다.
+
+1. claude.ai → 설정 → 커넥터 → 둘러보기에서 **Supabase**를 추가하고, 이 프로젝트가 있는 Supabase 계정으로 로그인합니다.
+2. claude.ai에 "학교 플래너" 프로젝트를 만들고 아래 지침을 프로젝트 지침에 붙여 넣습니다.
+3. 프로젝트 대화에서 Supabase 커넥터를 켜고, 사진과 함께 "이 일정 플래너에 넣어 줘"라고 말합니다.
+
+> ⚠ 이 커넥터는 DB 전체를 바꿀 수 있습니다(RLS를 거치지 않음). Claude가 `delete`, `drop`, `alter`, `truncate`나 여러 행을 바꾸는 `update`를 실행하겠다고 하면 내용을 꼭 확인하고 승인하세요. 사진 파일은 커넥터로 올릴 수 없으니, 필요하면 사이트에서 일정을 열어 직접 첨부합니다.
+
+### 프로젝트 지침
 
 ```
-claude.ai 대화 ──MCP──▶ Edge Function(planner-mcp) ──RPC──▶ Supabase DB
-                          │ 연결 주소의 토큰으로 관리자 확인
+너는 종촌고 1학년 7반 "학교 플래너"의 일정 입력 도우미다. Supabase 커넥터로 일정을 넣는다.
+- Supabase 프로젝트 이름: SchoolPlanner (project_ref: gzbnybhmxetxrsjwbgdq). 다른 프로젝트는 건드리지 않는다.
+- 일정 테이블: public.assessments
+  id text (형식: '<밀리초 타임스탬프>-<임의 12자리 16진수>', 예: (floor(extract(epoch from now())*1000))::bigint || '-' || substr(md5(random()::text),1,12))
+  title text (80자 이하), type text ('수행평가'|'과제'|'시험'|'기타'), date text ('YYYY-MM-DD'),
+  period text ('1'~'7' 또는 ''), subject text (모르면 '기타'), description text (500자 이하, 없으면 ''),
+  image text (항상 ''), completed boolean (false), updated_at timestamptz (now())
+- 시간표: public.timetable (period 1~7, day_of_week 1=월~5=금, subject, teacher)
+  날짜별 변경: public.timetable_overrides (date, period, subject, teacher)
+
+사진으로 일정을 넣을 때:
+1. 먼저 한국 시간 오늘 날짜((now() at time zone 'Asia/Seoul')::date), 시간표, 앞으로 등록된 일정(date >= 오늘 - 7일)을 조회한다.
+2. 사진에 실제로 적힌 일정만 뽑는다. "다음 주 화요일", "내일" 같은 상대 날짜는 오늘 기준으로 계산하고, 연도가 없으면 가장 가까운 미래로 본다.
+3. 과목과 요일이 시간표와 맞으면 교시를 채운다. 맞는 교시가 여러 개이거나 없으면 비워 둔다.
+4. 글씨가 흐리거나 날짜·과목·내용이 모호하면 저장하지 말고 먼저 짧게 물어본다.
+5. 이미 같은 날짜·비슷한 제목의 일정이 있으면 새로 넣지 말고 수정할지 물어본다.
+6. 저장 전에 일정 목록(날짜, 교시, 과목, 구분, 제목, 메모)을 표로 보여 주고 확인을 받은 뒤 insert 한다.
+7. insert/update만 쓴다. delete, drop, alter, truncate, 보안 정책 변경, 여러 행을 한꺼번에 바꾸는 update는 사용자가 분명히 요청하고 한 번 더 확인한 경우에만 한다.
+8. 저장 후 몇 개를 넣었는지 알려 주고, 사이트를 새로고침하면 보인다고 안내한다.
 ```
-
-### 처음 한 번 설치
-1. **SQL 실행**: SQL Editor에서 [`supabase/claude-connector.sql`](supabase/claude-connector.sql)을 실행합니다. (`security-migration.sql`을 먼저 실행한 상태여야 합니다.)
-2. **커넥터 서버 배포**: 대시보드 **Edge Functions → Deploy a new function → Via Editor**에서 이름을 `planner-mcp`로 정하고 [`supabase/functions/planner-mcp/index.ts`](supabase/functions/planner-mcp/index.ts) 내용을 붙여 넣어 **Deploy**합니다.
-   - 배포한 함수의 설정(Details)에서 **Verify JWT**(JWT 검증)를 **끕니다**. Claude는 Supabase 로그인 없이 부르기 때문입니다. 대신 연결 주소의 토큰으로 관리자를 확인합니다.
-   - Supabase CLI를 쓴다면 `supabase functions deploy planner-mcp --no-verify-jwt`로도 됩니다.
-3. **연결 주소 만들기**: 플래너 사이트에서 관리자로 로그인 → 상단 **🤖 Claude 연결** → **연결 주소 만들기** → **복사**. 주소는 만들 때 한 번만 보입니다.
-4. **claude.ai에 추가**: claude.ai → 설정 → 커넥터 → **사용자 지정 커넥터 추가**. 이름 `학교 플래너`, URL에 복사한 주소를 넣습니다.
-5. 대화의 도구 메뉴에서 학교 플래너 커넥터를 켜고, 사진과 함께 "이 일정 플래너에 넣어 줘"라고 말합니다.
-
-### 커넥터로 할 수 있는 일
-| 도구 | 하는 일 |
-|---|---|
-| `get_planner_context` | 오늘 날짜, 시간표, 날짜별 시간표 변경, 등록된 일정 보기 |
-| `list_schedules` | 기간 안의 일정 목록 |
-| `add_schedules` | 일정 여러 개 저장 (같은 날짜·같은 제목은 건너뜀) |
-| `update_schedule` | 일정 하나 고치기 |
-
-Claude는 확실하지 않은 내용이 있으면 먼저 물어보고, 저장할 목록을 보여 준 뒤 확인을 받고 저장하도록 안내받습니다. 삭제와 사진 첨부는 커넥터로 할 수 없고, 사이트에서 직접 합니다.
-
-### 보안
-- 연결 주소에는 관리자용 비밀 토큰이 들어 있습니다. 주소를 아는 사람은 일정을 추가·수정할 수 있으니 공유하지 마세요.
-- DB에는 토큰 원문이 아니라 SHA-256 해시만 저장합니다.
-- **🤖 Claude 연결 → 연결 끊기**를 누르거나, 계정을 `admins`에서 빼면 바로 막힙니다.
-
-### 문제가 생기면
-- **"연결 주소가 올바르지 않거나 끊어졌습니다"**: 사이트에서 새 주소를 만들고 claude.ai 커넥터의 URL을 바꿉니다.
-- **"Supabase에 claude-connector.sql을 먼저 실행해 주세요"**: 1단계 SQL을 실행합니다.
-- **커넥터 추가가 실패하거나 401 오류**: 함수 이름이 `planner-mcp`인지, JWT 검증을 껐는지, URL이 `…/functions/v1/planner-mcp/pln_…` 형태 그대로인지 확인합니다.
-- **저장했는데 안 보임**: 사이트를 새로고침합니다.
 
 ---
 
