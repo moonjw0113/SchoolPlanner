@@ -641,7 +641,7 @@ function saveLocal() {
   catch { throw new Error('저장 공간이 부족해요. 사진 크기를 줄이거나 이전 일정을 삭제해 주세요.'); }
 }
 
-async function saveItem(item, { reload = true } = {}) {
+async function saveItem(item) {
   if (!isAdmin) {
     toast('수행평가·과제를 저장할 권한이 없습니다.');
     return;
@@ -672,7 +672,7 @@ async function saveItem(item, { reload = true } = {}) {
     if (index < 0) items.push(record); else items[index] = record;
     saveLocal();
   }
-  if (reload) await loadAllData();
+  await loadAllData();
 }
 
 async function deleteItem(id) {
@@ -980,7 +980,7 @@ function setFormDisabled(disabled) {
   $('saveBtn').style.display = disabled ? 'none' : 'inline-block';
 }
 
-function openManualEntry(iso = fmtDate(new Date()), period = '') {
+function openNew(iso = fmtDate(new Date()), period = '') {
   if (!isAdmin) {
     toast('등록 권한이 필요합니다. 상단의 [🔑 관리자 로그인] 버튼으로 로그인해 주세요.');
     return;
@@ -1103,227 +1103,6 @@ function openDateTimetableDialog(isoDate = '') {
   renderDateTimetableEditGrid(dateToUse);
   $('dateTimetableDialog').showModal();
 }
-
-// ===== AI로 일정 추가 (사진 → Supabase Edge Function → Claude) =====
-// 일정 추가는 기본적으로 AI 창을 연다. Supabase가 없거나 직접 입력을 고르면 기존 입력 창을 쓴다.
-let aiImage = '';
-let aiHintDate = '';
-let aiHintPeriod = '';
-let aiResultItems = [];
-
-function openNew(iso = '', period = '') {
-  if (!isAdmin) {
-    toast('등록 권한이 필요합니다. 상단의 [🔑 관리자 로그인] 버튼으로 로그인해 주세요.');
-    return;
-  }
-  if (!supabaseClient) return openManualEntry(iso || fmtDate(new Date()), period);
-  aiHintDate = iso;
-  aiHintPeriod = period ? String(period) : '';
-  aiImage = '';
-  aiResultItems = [];
-  $('aiForm').reset();
-  $('aiImagePreview').replaceChildren();
-  $('aiHint').hidden = !aiHintDate;
-  $('aiHint').textContent = aiHintDate ? `선택한 날짜: ${dateText(aiHintDate)}${aiHintPeriod ? ` ${aiHintPeriod}교시` : ''} (사진에 날짜가 없으면 이 날짜로 봐요)` : '';
-  showAiStep('pick');
-  $('aiDialog').showModal();
-}
-
-function showAiStep(step) {
-  $('aiPickStep').hidden = step !== 'pick';
-  $('aiLoading').hidden = step !== 'loading';
-  $('aiReviewStep').hidden = step !== 'review';
-  $('aiAnalyzeBtn').hidden = step === 'review';
-  $('aiAnalyzeBtn').disabled = step !== 'pick' || !aiImage;
-  $('aiBackBtn').hidden = step !== 'review';
-  $('aiSaveBtn').hidden = step !== 'review';
-  $('aiManualBtn').disabled = step === 'loading';
-}
-
-// 큰 사진은 긴 변 1600px JPEG로 줄인다. (전송량·비용 절약, 첨부 용량 1.5MB 이내)
-function resizeImage(file, maxSide = 1600, quality = 0.85) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.round(img.naturalWidth * scale);
-      canvas.height = Math.round(img.naturalHeight * scale);
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', quality));
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('사진을 열 수 없어요. 다른 사진을 골라 주세요.')); };
-    img.src = url;
-  });
-}
-
-function timetableText() {
-  return Object.entries(dbSchedule).map(([period, subjects]) => `${period}교시: ${subjects.map(s => s || '-').join(' / ')}`).join('\n');
-}
-
-async function analyzeAiImage() {
-  if (!aiImage) return;
-  showAiStep('loading');
-  try {
-    const { data, error } = await supabaseClient.functions.invoke('analyze-schedule', {
-      body: {
-        image: aiImage,
-        today: fmtDate(new Date()),
-        hintDate: aiHintDate,
-        hintPeriod: aiHintPeriod,
-        timetable: timetableText(),
-        subjects: Object.keys(subjectColors)
-      }
-    });
-    if (error) {
-      let message = '';
-      try { message = (await error.context.json()).error; } catch { }
-      throw new Error(message || 'AI 분석에 실패했어요. 잠시 후 다시 시도하거나 직접 입력해 주세요.');
-    }
-    aiResultItems = (Array.isArray(data?.items) ? data.items : []).map(raw => {
-      const questions = Array.isArray(raw.questions) ? raw.questions.map(String).filter(Boolean) : [];
-      const date = /^\d{4}-\d{2}-\d{2}$/.test(raw.date) ? raw.date : '';
-      const period = /^[1-7]$/.test(String(raw.period ?? '')) ? String(raw.period) : '';
-      if (!date && !questions.length) questions.push('날짜를 찾지 못했어요. 날짜를 입력해 주세요.');
-      return {
-        include: true,
-        confirmed: questions.length === 0,
-        questions,
-        title: String(raw.title || '').slice(0, 80),
-        type: ITEM_TYPES.includes(raw.type) ? raw.type : '과제',
-        date,
-        period,
-        subject: String(raw.subject || (date && period ? daySubject(date, period) : '') || '').slice(0, 40),
-        description: String(raw.description || '').slice(0, 500)
-      };
-    });
-    // 확인이 필요한 일정을 위로 올린다.
-    aiResultItems.sort((a, b) => Number(b.questions.length > 0) - Number(a.questions.length > 0));
-    const needCheck = aiResultItems.filter(item => item.questions.length).length;
-    const notes = [needCheck ? `확인이 필요한 일정이 ${needCheck}개 있어요. 노란 칸의 질문을 보고 고쳐 주세요.` : '', data?.notes || ''].filter(Boolean).join(' ');
-    $('aiNotes').hidden = !notes;
-    $('aiNotes').textContent = notes;
-    if (!aiResultItems.length) {
-      $('aiNotes').hidden = false;
-      if (!data?.notes) $('aiNotes').textContent = '사진에서 일정을 찾지 못했어요. 다른 사진을 올리거나 직접 입력해 주세요.';
-    }
-    renderAiResults();
-    showAiStep('review');
-  } catch (err) {
-    console.error('AI 분석 실패:', err);
-    toast(err.message);
-    showAiStep('pick');
-  }
-}
-
-function renderAiResults() {
-  const typeOptions = selected => ITEM_TYPES.map(t => `<option${t === selected ? ' selected' : ''}>${t}</option>`).join('');
-  const periodOptions = selected => ['', '1', '2', '3', '4', '5', '6', '7'].map(p => `<option value="${p}"${p === selected ? ' selected' : ''}>${p ? p + '교시' : '교시 없음'}</option>`).join('');
-  $('aiResults').innerHTML = aiResultItems.map((item, i) => `
-    <div class="ai-card ${item.include ? '' : 'excluded'} ${item.questions.length && !item.confirmed ? 'needs-check' : ''}" data-index="${i}">
-      <label class="ai-card-head"><input type="checkbox" data-field="include" ${item.include ? 'checked' : ''} /> 일정 ${i + 1} 저장하기</label>
-      <div class="form-grid">
-        <label class="wide">제목<input data-field="title" maxlength="80" value="${escape(item.title)}" /></label>
-        <label>구분<select data-field="type">${typeOptions(item.type)}</select></label>
-        <label>날짜<input data-field="date" type="date" value="${escape(item.date)}" /></label>
-        <label>교시<select data-field="period">${periodOptions(item.period)}</select></label>
-        <label>과목<input data-field="subject" list="subjects" maxlength="40" value="${escape(item.subject)}" /></label>
-        <label class="wide">메모<textarea data-field="description" rows="2" maxlength="500">${escape(item.description)}</textarea></label>
-      </div>
-      ${item.questions.length ? `<div class="ai-questions"><strong>⚠ AI가 확인을 요청했어요</strong><ul>${item.questions.map(q => `<li>${escape(q)}</li>`).join('')}</ul><label><input type="checkbox" data-field="confirmed" ${item.confirmed ? 'checked' : ''} /> 확인하고 고쳤어요</label></div>` : ''}
-    </div>`).join('');
-}
-
-function readAiField(target) {
-  const card = target.closest('.ai-card');
-  if (!card || !target.dataset.field) return;
-  const item = aiResultItems[Number(card.dataset.index)];
-  const field = target.dataset.field;
-  item[field] = target.type === 'checkbox' ? target.checked : target.value;
-  if (field === 'period' || field === 'date') {
-    const recommended = daySubject(item.date, item.period);
-    if (recommended && item.date && item.period) {
-      item.subject = recommended;
-      card.querySelector('[data-field="subject"]').value = recommended;
-    }
-  }
-  card.classList.toggle('excluded', !item.include);
-  card.classList.toggle('needs-check', item.questions.length > 0 && !item.confirmed);
-}
-
-async function saveAiResults() {
-  const chosen = aiResultItems.filter(item => item.include);
-  if (!chosen.length) return toast('저장할 일정을 하나 이상 골라 주세요.');
-  const unconfirmed = chosen.findIndex(item => item.questions.length && !item.confirmed);
-  if (unconfirmed >= 0) return toast(`일정 ${aiResultItems.indexOf(chosen[unconfirmed]) + 1}의 확인 요청을 보고 [확인하고 고쳤어요]를 눌러 주세요.`);
-  const invalid = chosen.find(item => !item.title.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(item.date));
-  if (invalid) return toast(`일정 ${aiResultItems.indexOf(invalid) + 1}의 제목과 날짜를 입력해 주세요.`);
-
-  const attach = $('aiAttachImage').checked && isSafeImage(aiImage) && aiImage.length <= 2 * 1024 * 1024;
-  const btn = $('aiSaveBtn');
-  btn.disabled = true;
-  btn.textContent = '저장 중…';
-  let saved = 0;
-  try {
-    for (const item of chosen) {
-      await saveItem({
-        id: '',
-        title: item.title,
-        date: item.date,
-        period: item.period,
-        subject: item.subject,
-        type: item.type,
-        description: item.description,
-        image: attach ? aiImage : '',
-        imageChanged: true,
-        completed: false
-      }, { reload: false });
-      saved++;
-    }
-    $('aiDialog').close();
-    toast(`일정 ${saved}개를 저장했어요.`);
-  } catch (err) {
-    toast(`${saved}개 저장 후 실패했어요: ${err.message || '다시 시도해 주세요.'}`);
-    aiResultItems = aiResultItems.filter(item => !chosen.slice(0, saved).includes(item));
-    renderAiResults();
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '선택한 일정 저장';
-    await loadAllData();
-  }
-}
-
-$('aiImageInput').addEventListener('change', async event => {
-  const file = event.target.files[0];
-  aiImage = '';
-  $('aiImagePreview').replaceChildren();
-  showAiStep('pick');
-  if (!file) return;
-  try {
-    aiImage = await resizeImage(file);
-    const img = document.createElement('img');
-    img.alt = '분석할 사진 미리보기';
-    img.src = aiImage;
-    $('aiImagePreview').appendChild(img);
-  } catch (err) {
-    toast(err.message);
-    event.target.value = '';
-  }
-  showAiStep('pick');
-});
-$('aiAnalyzeBtn').onclick = analyzeAiImage;
-$('aiSaveBtn').onclick = saveAiResults;
-$('aiBackBtn').onclick = () => { aiResultItems = []; showAiStep('pick'); };
-$('aiManualBtn').onclick = () => { $('aiDialog').close(); openManualEntry(aiHintDate || fmtDate(new Date()), aiHintPeriod); };
-$('closeAiDialog').onclick = () => $('aiDialog').close();
-$('aiResults').addEventListener('input', event => readAiField(event.target));
-$('aiResults').addEventListener('change', event => readAiField(event.target));
-$('aiForm').addEventListener('submit', event => event.preventDefault());
 
 function previewImage(src) {
   const box = $('imagePreview');
