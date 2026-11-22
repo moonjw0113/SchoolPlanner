@@ -66,7 +66,8 @@ const escape = text => String(text).replace(/[&<>'"]/g, char => ({ '&': '&amp;',
 
 // DB 값은 누가 넣었는지 믿을 수 없으므로, 화면에 쓰기 전에 형식을 검사해 정리한다.
 const ITEM_TYPES = ['수행평가', '과제', '시험', '기타'];
-const isSafeImage = src => typeof src === 'string' && /^data:image\/(png|jpe?g|gif|webp|bmp|avif);base64,[A-Za-z0-9+/=]+$/i.test(src);
+// <img>로만 보여 주므로 SVG 안의 스크립트는 실행되지 않는다. (예전에 사진 여러 장을 SVG 하나로 묶어 저장한 일정이 있음)
+const isSafeImage = src => typeof src === 'string' && /^data:image\/(png|jpe?g|gif|webp|bmp|avif|svg\+xml);base64,[A-Za-z0-9+/=]+$/i.test(src);
 function normalizeItem(raw) {
   const period = String(raw.period ?? '');
   return {
