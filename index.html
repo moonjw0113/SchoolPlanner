@@ -18,7 +18,7 @@
         class="view-tab" data-view="calendar">달력</button><button class="view-tab" data-view="timetable">시간표</button>
     </nav>
     <div class="top-actions">
-      <button class="secondary" id="authBtn">🔑 등록 권한</button>
+      <button class="secondary" id="authBtn">🔑 관리자 로그인</button>
       <button class="primary" id="newEntryBtn">+ 일정 추가</button>
     </div>
   </header>
@@ -122,6 +122,25 @@
       <div class="dialog-actions"><button type="button" class="danger" id="deleteBtn"
           hidden>삭제</button><span></span><button type="button" class="secondary" id="cancelBtn">취소</button><button
           class="primary" id="saveBtn">저장</button></div>
+    </form>
+  </dialog>
+  <dialog id="loginDialog">
+    <form id="loginForm" method="dialog">
+      <div class="dialog-title">
+        <div>
+          <p class="eyebrow">등록 권한</p>
+          <h2>관리자 로그인</h2>
+        </div><button type="button" class="close" id="closeLoginDialog">×</button>
+      </div>
+      <div class="form-grid">
+        <label class="wide">이메일<input id="loginEmail" type="email" autocomplete="username" required /></label>
+        <label class="wide">비밀번호<input id="loginPassword" type="password" autocomplete="current-password"
+            required /></label>
+      </div>
+      <div class="dialog-actions"><span></span>
+        <button type="button" class="secondary" id="cancelLoginBtn">취소</button>
+        <button class="primary" id="loginSubmitBtn">로그인</button>
+      </div>
     </form>
   </dialog>
   <dialog id="locationDialog">

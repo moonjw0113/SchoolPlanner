@@ -12,9 +12,12 @@ if (window.supabase && SUPABASE_URL && !SUPABASE_URL.includes('YOUR_SUPABASE')) 
   }
 }
 
-// 등록 권한 비밀번호 (하드코딩)
-const ADMIN_PASSWORD = '2010';
-let isAdmin = localStorage.getItem('school_planner_is_admin') === 'true';
+// 등록 권한: Supabase 로그인 + DB의 admins 테이블로 판단한다.
+// 화면의 isAdmin은 버튼 표시용일 뿐이고, 실제 쓰기 권한은 RLS 정책이 검사한다.
+// Supabase에 연결하지 못한 로컬 모드에서는 이 브라우저에만 저장되므로 바로 편집할 수 있다.
+let isAdmin = !supabaseClient;
+let currentUserEmail = '';
+try { localStorage.removeItem('school_planner_is_admin'); } catch { }
 
 // 기본 시간표 및 교사 정보 (Supabase 데이터 미존재 시 초기 시드용)
 const defaultSchedule = {
@@ -537,12 +540,15 @@ function updateAuthUI() {
   const editDefaultBtn = $('editDefaultTimetableBtn');
   const editDateBtn = $('editDateTimetableBtn');
   if (authBtn) {
-    if (isAdmin) {
-      authBtn.textContent = '🔒 등록 권한 해제';
-      authBtn.title = '클릭하면 일반 사용자(조회 전용) 모드로 전환됩니다';
+    if (!supabaseClient) {
+      authBtn.textContent = '💾 로컬 모드';
+      authBtn.title = '서버에 연결되지 않아 이 브라우저에만 저장됩니다';
+    } else if (currentUserEmail) {
+      authBtn.textContent = '🔒 로그아웃';
+      authBtn.title = `${currentUserEmail} 로그아웃 (조회 전용 모드로 전환)`;
     } else {
-      authBtn.textContent = '🔑 등록 권한';
-      authBtn.title = '수행평가·과제 등록/수정 비밀번호 입력';
+      authBtn.textContent = '🔑 관리자 로그인';
+      authBtn.title = '수행평가·과제 등록/수정을 위한 관리자 로그인';
     }
   }
   if (newBtn) {
@@ -556,25 +562,75 @@ function updateAuthUI() {
   }
 }
 
-function handleAuthToggle() {
-  if (isAdmin) {
-    isAdmin = false;
-    localStorage.removeItem('school_planner_is_admin');
+async function refreshAdminState() {
+  if (!supabaseClient) return;
+  let nextIsAdmin = false;
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    currentUserEmail = session?.user?.email || '';
+    if (session) {
+      const { data, error } = await supabaseClient.rpc('is_admin');
+      if (error) throw error;
+      nextIsAdmin = data === true;
+    }
+  } catch (err) {
+    console.error('관리자 권한 확인 실패:', err);
+  }
+  if (nextIsAdmin !== isAdmin) {
+    isAdmin = nextIsAdmin;
     updateAuthUI();
     render();
-    toast('일반 사용자(조회 전용) 모드로 전환되었습니다.');
   } else {
-    const input = prompt('등록 권한 비밀번호를 입력해 주세요:');
-    if (input === null) return;
-    if (input === ADMIN_PASSWORD) {
-      isAdmin = true;
-      localStorage.setItem('school_planner_is_admin', 'true');
-      updateAuthUI();
-      render();
-      toast('등록 권한이 활성화되었습니다!');
+    updateAuthUI();
+  }
+}
+
+async function handleAuthToggle() {
+  if (!supabaseClient) {
+    toast('서버에 연결되지 않아 이 브라우저에만 저장되는 로컬 모드입니다.');
+    return;
+  }
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (session) {
+    await supabaseClient.auth.signOut();
+    isAdmin = false;
+    currentUserEmail = '';
+    updateAuthUI();
+    render();
+    toast('로그아웃했습니다. 조회 전용 모드입니다.');
+    return;
+  }
+  $('loginForm').reset();
+  $('loginDialog').showModal();
+  $('loginEmail').focus();
+}
+
+async function handleLoginSubmit(event) {
+  event.preventDefault();
+  const btn = $('loginSubmitBtn');
+  btn.disabled = true;
+  try {
+    const { error } = await supabaseClient.auth.signInWithPassword({
+      email: $('loginEmail').value.trim(),
+      password: $('loginPassword').value
+    });
+    if (error) throw error;
+    await refreshAdminState();
+    $('loginDialog').close();
+    if (isAdmin) {
+      toast('관리자 권한이 활성화되었습니다!');
     } else {
-      toast('비밀번호가 올바르지 않습니다.');
+      await supabaseClient.auth.signOut();
+      currentUserEmail = '';
+      updateAuthUI();
+      toast('이 계정에는 등록 권한이 없습니다.');
     }
+  } catch (err) {
+    console.error('로그인 실패:', err);
+    toast('이메일 또는 비밀번호가 올바르지 않습니다.');
+  } finally {
+    btn.disabled = false;
+    $('loginPassword').value = '';
   }
 }
 
@@ -920,7 +976,7 @@ function setFormDisabled(disabled) {
 
 function openNew(iso = fmtDate(new Date()), period = '') {
   if (!isAdmin) {
-    toast('등록 권한이 필요합니다. 상단의 [🔑 등록 권한] 버튼을 클릭해 주세요.');
+    toast('등록 권한이 필요합니다. 상단의 [🔑 관리자 로그인] 버튼으로 로그인해 주세요.');
     return;
   }
   editingId = null; editImage = ''; $('entryForm').reset(); $('entryId').value = ''; $('formEyebrow').textContent = '새 일정'; $('formTitle').textContent = '수행평가·과제 추가'; $('deleteBtn').hidden = true; $('imagePreview').innerHTML = ''; setFormDisabled(false); setDateAndSubject(iso, period); $('entryDialog').showModal(); $('title').focus();
@@ -940,7 +996,7 @@ function openEdit(id) {
 let currentLocTarget = null;
 function openLocationDialog(date, period, subject) {
   if (!isAdmin) {
-    toast('등록 권한이 필요합니다. 상단의 [🔑 등록 권한] 버튼을 클릭해 주세요.');
+    toast('등록 권한이 필요합니다. 상단의 [🔑 관리자 로그인] 버튼으로 로그인해 주세요.');
     return;
   }
   currentLocTarget = { date, period, subject };
@@ -982,7 +1038,7 @@ function renderDefaultTimetableEditGrid() {
 
 function openDefaultTimetableDialog() {
   if (!isAdmin) {
-    toast('등록 권한이 필요합니다. 상단의 [🔑 등록 권한] 버튼을 클릭해 주세요.');
+    toast('등록 권한이 필요합니다. 상단의 [🔑 관리자 로그인] 버튼으로 로그인해 주세요.');
     return;
   }
   renderDefaultTimetableEditGrid();
@@ -1019,7 +1075,7 @@ function renderDateTimetableEditGrid(isoDate) {
 
 function openDateTimetableDialog(isoDate = '') {
   if (!isAdmin) {
-    toast('등록 권한이 필요합니다. 상단의 [🔑 등록 권한] 버튼을 클릭해 주세요.');
+    toast('등록 권한이 필요합니다. 상단의 [🔑 관리자 로그인] 버튼으로 로그인해 주세요.');
     return;
   }
   const dateToUse = isoDate || $('scheduleDate').value || fmtDate(new Date());
@@ -1050,6 +1106,9 @@ if ($('brandBtn')) {
 }
 
 if ($('authBtn')) $('authBtn').onclick = handleAuthToggle;
+if ($('loginForm')) $('loginForm').addEventListener('submit', handleLoginSubmit);
+if ($('closeLoginDialog')) $('closeLoginDialog').onclick = () => $('loginDialog').close();
+if ($('cancelLoginBtn')) $('cancelLoginBtn').onclick = () => $('loginDialog').close();
 if ($('editDefaultTimetableBtn')) $('editDefaultTimetableBtn').onclick = () => openDefaultTimetableDialog();
 if ($('editDateTimetableBtn')) $('editDateTimetableBtn').onclick = () => openDateTimetableDialog();
 $('newEntryBtn').onclick = () => openNew();
@@ -1206,6 +1265,12 @@ $('todayLabel').textContent = new Intl.DateTimeFormat('ko-KR', { month: 'long', 
 $('scheduleDate').value = fmtDate(now);
 renderDayTabs(); // 요일 탭 초기 렌더
 updateAuthUI();
+if (supabaseClient) {
+  supabaseClient.auth.onAuthStateChange(event => {
+    // 콜백 안에서 Supabase를 바로 호출하면 교착될 수 있어 다음 틱으로 미룬다.
+    if (event === 'SIGNED_OUT' || event === 'SIGNED_IN' || event === 'INITIAL_SESSION') setTimeout(refreshAdminState, 0);
+  });
+}
 loadAllData().then(() => {
   setupRealtime();
   startFallbackTimer();
