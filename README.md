@@ -13,7 +13,7 @@
 2. **Supabase 연동**: 등록한 일정을 온라인 데이터베이스에 보관 (모든 접속자가 공유, Realtime 반영)
 3. **사진 첨부 지원**: 1.5MB 이하 사진을 DataURL로 저장. 목록에서는 사진을 빼고 불러오고, 일정을 열 때만 사진을 받는다.
 4. **자동 과목 입력**: 종촌고 1-7 시간표 기반으로 교시 선택 시 과목 및 담당 교사 자동 연결
-5. **2026 공휴일 및 달력 뷰**: 대한민국 공휴일 자동 표시 및 일별/월별 할 일 보기
+5. **학사일정과 달력 뷰**: 공휴일·휴업일·방학·행사·시험기간을 달력에 표시하고, 수업 없는 날은 날짜별 수업 보기에서 시간표를 숨김. 관리자는 달력의 **📅 학사일정**에서 추가·수정·삭제
 6. **Claude로 일정 넣기**: claude.ai에 Supabase 공식 커넥터를 연결하고 알림장·공지 사진을 올리면, Claude가 일정을 정리해 확인을 받은 뒤 DB에 저장한다. (API 키 불필요)
 
 ---
@@ -69,6 +69,8 @@ create table if not exists timetable_location_overrides (
    - Realtime 구독 대상 등록
 
    이미 운영 중인 DB도 이 파일만 한 번 실행하면 됩니다. 여러 번 실행해도 안전합니다.
+
+   그다음 [`supabase/school-events.sql`](supabase/school-events.sql)을 실행해 학사일정 테이블을 만듭니다. (2026년 공휴일이 함께 들어갑니다.)
 
 4. Supabase 프로젝트의 **Project Settings → API**에서 `Project URL`과 공개용(publishable/anon) 키를 복사해 `app.js` 상단의 `SUPABASE_URL`, `SUPABASE_ANON_KEY`에 넣습니다. 이 키는 공개돼도 되는 키입니다. `service_role` 키는 절대 넣지 마세요.
 
