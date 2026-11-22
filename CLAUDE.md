@@ -1,6 +1,6 @@
 # 학교 플래너 (SchoolPlanner)
 
-종촌고 1학년 7반 수행평가·과제를 달력/시간표로 관리하는 웹앱. 바닐라 JS(`app.js`, `index.html`, `style.css`, `style-overrides.css`) + 간단한 Node 서버(`server.js`), Supabase 연동, GitHub Pages로 `main`이 배포된다.
+종촌고 1학년 7반 수행평가·과제를 달력/시간표로 관리하는 웹앱. 바닐라 JS(`app.js`, `index.html`, `style.css`, `style-overrides.css`) + 로컬용 정적 파일 서버(`server.js`), Supabase 연동, GitHub Pages로 `main`이 배포된다.
 
 ## 실행
 - `node server.js` (Node 18 이상, 기본 포트 3000). Windows에서는 `start-school-planner.cmd`.
@@ -19,4 +19,4 @@
 
 ## 주의
 - `app.js`의 Supabase 키는 공개용 publishable 키다. 그 외 비밀 값(서비스 롤 키, 비밀번호 등)은 절대 커밋하지 않는다.
-- `data/assessments.json`은 로컬 서버가 쓰는 데이터 파일이다. 실제 일정 데이터를 불필요하게 바꾸거나 지우지 않는다.
+- `data/assessments.json`은 예전 로컬 서버 API가 쓰던 파일로, 지금은 쓰이지 않는다. `server.js`는 `PUBLIC_FILES`에 적힌 파일만 내려주는 정적 서버다.
