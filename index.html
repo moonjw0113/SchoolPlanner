@@ -124,6 +124,34 @@
           class="primary" id="saveBtn">저장</button></div>
     </form>
   </dialog>
+  <dialog id="aiDialog" class="wide-dialog">
+    <form id="aiForm" method="dialog">
+      <div class="dialog-title">
+        <div>
+          <p class="eyebrow">AI 일정 추가</p>
+          <h2>사진으로 일정 추가</h2>
+        </div><button type="button" class="close" id="closeAiDialog">×</button>
+      </div>
+      <div id="aiPickStep">
+        <p class="dialog-desc">알림장, 칠판, 공지문, 수행평가 안내문 사진을 올리면 AI가 날짜와 내용을 정리해 줘요. 저장하기 전에 확인하고 고칠 수 있어요.</p>
+        <label class="ai-drop">사진 선택<input id="aiImageInput" type="file" accept="image/*" /></label>
+        <div id="aiImagePreview" class="ai-image-preview"></div>
+        <p id="aiHint" class="ai-hint" hidden></p>
+      </div>
+      <div id="aiLoading" class="ai-loading" hidden><span class="ai-spinner"></span>사진을 분석하고 있어요… (10~30초)</div>
+      <div id="aiReviewStep" hidden>
+        <p id="aiNotes" class="ai-notes" hidden></p>
+        <div id="aiResults" class="ai-results"></div>
+        <label class="ai-attach"><input type="checkbox" id="aiAttachImage" checked /> 원본 사진을 일정에 첨부</label>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="secondary" id="aiManualBtn">직접 입력하기</button><span></span>
+        <button type="button" class="secondary" id="aiBackBtn" hidden>다른 사진</button>
+        <button type="button" class="primary" id="aiAnalyzeBtn" disabled>분석하기</button>
+        <button type="button" class="primary" id="aiSaveBtn" hidden>선택한 일정 저장</button>
+      </div>
+    </form>
+  </dialog>
   <dialog id="loginDialog">
     <form id="loginForm" method="dialog">
       <div class="dialog-title">
