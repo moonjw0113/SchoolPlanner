@@ -91,6 +91,16 @@ insert into admins (user_id) select id from auth.users where email = 'admin@exam
 
 ---
 
+## 📷 Claude Code 채팅으로 사진 속 일정 넣기 (사진 첨부 포함)
+
+claude.ai/code에서 이 저장소로 새 채팅을 열고 사진을 첨부한 뒤 "이 일정 플래너에 넣어 줘"라고 하면, Claude가 [`add-schedule-from-photo`](.claude/skills/add-schedule-from-photo/SKILL.md) 순서대로 일정을 정리하고, 확인을 받은 뒤 [`scripts/add_schedules.py`](scripts/add_schedules.py)로 **사진과 함께** 저장합니다.
+
+- 채팅은 Supabase 비밀 키(`sb_secret_…`)가 네트워크 비밀 값으로 저장된 클라우드 환경에서 열어야 합니다. 키는 프록시가 `gzbnybhmxetxrsjwbgdq.supabase.co` 요청에만 넣어 주므로 코드·채팅·커밋에 남지 않습니다.
+- 비밀 키는 RLS를 거치지 않으므로, 스크립트는 일정 추가만 하고 같은 날짜·같은 제목은 건너뜁니다. 저장 후 다시 읽어서 확인합니다.
+- 연결 확인: `python3 scripts/add_schedules.py --check`
+
+---
+
 ## 🤖 Claude로 사진 속 일정 넣기 (Supabase 공식 커넥터)
 
 claude.ai에 Supabase 공식 커넥터를 연결하면 Claude가 SQL로 `assessments` 테이블에 일정을 바로 넣습니다. 사이트는 Realtime으로 자동 반영됩니다.
