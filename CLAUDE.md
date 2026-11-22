@@ -19,6 +19,9 @@
 - 커밋은 작은 단위로 나눈다.
 - 문제가 생기면 `git revert`로 되돌린다. 강제 push(`--force`)는 하지 않는다.
 
+## 사진으로 일정 넣기
+- 사용자가 사진을 첨부하고 일정을 넣어 달라고 하면 `.claude/skills/add-schedule-from-photo/SKILL.md` 순서를 따른다. DB에만 쓰는 작업이라 브랜치·PR이 필요 없다.
+
 ## 주의
 - `app.js`의 Supabase 키는 공개용 publishable 키다. 그 외 비밀 값(서비스 롤 키, 비밀번호 등)은 절대 커밋하지 않는다.
 - `data/assessments.json`은 예전 로컬 서버 API가 쓰던 파일로, 지금은 쓰이지 않는다. `server.js`는 `PUBLIC_FILES`에 적힌 파일만 내려주는 정적 서버다.
