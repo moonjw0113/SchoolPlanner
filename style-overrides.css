@@ -923,3 +923,45 @@ dialog.image-viewer.zoomed .image-viewer-body img { max-width: none; max-height:
   .image-viewer-bar { padding: 8px 10px; gap: 6px; }
   .image-viewer-btn { padding: 7px 9px; font-size: 12px; }
 }
+
+/* ===== 학사일정 ===== */
+.calendar-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.event-key { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+.event-key i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-left: 6px; }
+.event-key i:first-child { margin-left: 0; }
+.event-label {
+  font-size: 10px;
+  font-weight: bold;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.35;
+  margin-top: -2px;
+  cursor: pointer;
+}
+.event-label.more-events { color: var(--muted); font-weight: normal; }
+.daily-event {
+  border-left: 4px solid;
+  background: #f6f7fb;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.daily-event-kind { font-weight: bold; font-size: 11px; margin-right: 4px; }
+.daily-event small { color: var(--muted); }
+.daily-event-note { display: block; margin-top: 2px; }
+.event-list { display: grid; gap: 8px; max-height: 40vh; overflow-y: auto; margin-bottom: 14px; }
+.event-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
+.event-kind { color: #fff; font-size: 11px; font-weight: bold; border-radius: 6px; padding: 3px 7px; white-space: nowrap; }
+.event-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.event-main strong { font-size: 13px; }
+.event-main small { font-size: 11px; color: var(--muted); }
+.event-form-title { font-weight: bold; font-size: 13px; margin: 4px 0 10px; }
+.event-help { font-size: 11px; color: var(--muted); margin: 10px 0 0; }
+@media (max-width: 620px) {
+  .event-label { font-size: 8px; }
+  .event-key { display: none; }
+}
