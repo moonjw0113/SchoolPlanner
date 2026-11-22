@@ -40,8 +40,9 @@ const defaultTeachers = {
 };
 const subjectColors = { '공통영어': '#f3df8b', '통합사회': '#edb993', '체육': '#b795d0', '진로직업': '#efb28a', '공통국어': '#b7c4e5', '공통수학': '#a7dccb', '음악': '#b8f000', '한국사': '#bebebe', '통합과학': '#d7c4e5', '기술': '#93acd9', '가정': '#93acd9', '진로': '#e2e2e2', '창체': '#eee' };
 
-// 2026년 한국 공휴일.
-const holidays = {
+// 학사일정(공휴일·휴업일·방학·행사·시험기간)은 Supabase school_events에서 불러온다.
+// 아래 2026년 공휴일은 Supabase에 연결하지 못했을 때(로컬 모드, 불러오기 실패)만 쓰는 예비 목록이다.
+const fallbackHolidays = {
   '2026-01-01': '신정', '2026-02-16': '설날 연휴', '2026-02-17': '설날', '2026-02-18': '설날 연휴', '2026-03-01': '삼일절', '2026-03-02': '대체공휴일', '2026-05-01': '근로자의 날', '2026-05-05': '어린이날', '2026-05-24': '부처님오신날', '2026-05-25': '대체공휴일', '2026-06-06': '현충일', '2026-07-17': '제헌절', '2026-08-15': '광복절', '2026-08-17': '대체공휴일', '2026-09-24': '추석 연휴', '2026-09-25': '추석', '2026-09-26': '추석 연휴', '2026-10-03': '개천절', '2026-10-05': '대체공휴일', '2026-10-09': '한글날', '2026-12-25': '성탄절'
 };
 
@@ -54,6 +55,16 @@ let items = [];
 let defaultLocations = {};
 let dateLocations = {};
 let dateTimetableOverrides = {};
+let schoolEvents = [];
+let eventsByDate = {};
+// noClass: 그날 정규 수업이 없음, red: 달력 날짜를 빨간색으로
+const EVENT_KINDS = {
+  '공휴일': { color: '#d6535c', noClass: true, red: true },
+  '휴업일': { color: '#e07b39', noClass: true, red: true },
+  '방학': { color: '#2f9469', noClass: true, red: false },
+  '행사': { color: '#7a5cd6', noClass: false, red: false },
+  '시험기간': { color: '#506cfe', noClass: false, red: false }
+};
 let dbSchedule = { ...defaultSchedule };
 let dbTeachers = { ...defaultTeachers };
 let selectedDate = new Date(), editImage = '', editImageChanged = false, editingId = null;
@@ -253,6 +264,45 @@ async function loadDateTimetableOverridesData() {
   }
 }
 
+function buildEventsByDate() {
+  const map = {};
+  schoolEvents.forEach(ev => {
+    const d = new Date(`${ev.start_date}T12:00:00`);
+    for (let i = 0; i <= 120; i++) {
+      const iso = fmtDate(d);
+      if (iso > ev.end_date) break;
+      (map[iso] ||= []).push(ev);
+      d.setDate(d.getDate() + 1);
+    }
+  });
+  // 수업 없는 날(공휴일·휴업일·방학)을 먼저, 그다음 짧은 일정 순
+  Object.values(map).forEach(list => list.sort((a, b) => Number(EVENT_KINDS[b.kind].noClass) - Number(EVENT_KINDS[a.kind].noClass) || a.end_date.localeCompare(b.end_date)));
+  eventsByDate = map;
+}
+
+function useFallbackHolidays() {
+  schoolEvents = Object.entries(fallbackHolidays).map(([iso, title]) => ({ id: `fallback-${iso}`, start_date: iso, end_date: iso, title, kind: '공휴일', note: '' }));
+}
+
+async function loadSchoolEventsData() {
+  if (!supabaseClient) { useFallbackHolidays(); buildEventsByDate(); return; }
+  try {
+    const { data, error } = await supabaseClient.from('school_events').select('id,start_date,end_date,title,kind,note').order('start_date');
+    if (error) throw error;
+    schoolEvents = (data || []).filter(ev => EVENT_KINDS[ev.kind] && /^\d{4}-\d{2}-\d{2}$/.test(ev.start_date) && /^\d{4}-\d{2}-\d{2}$/.test(ev.end_date))
+      .map(ev => ({ ...ev, title: String(ev.title || ''), note: String(ev.note || '') }));
+  } catch (err) {
+    console.error('school_events 로드 실패:', err);
+    loadFailed = true;
+    if (!schoolEvents.length) useFallbackHolidays();
+  }
+  buildEventsByDate();
+}
+
+const dayEvents = iso => eventsByDate[iso] || [];
+const noClassEvent = iso => dayEvents(iso).find(ev => EVENT_KINDS[ev.kind].noClass);
+const eventRangeText = ev => ev.start_date === ev.end_date ? dateText(ev.start_date) : `${dateText(ev.start_date)} ~ ${dateText(ev.end_date)}`;
+
 async function loadAllData() {
   loadFailed = false;
   await Promise.all([
@@ -260,7 +310,8 @@ async function loadAllData() {
     loadTimetableData(),
     loadDateTimetableOverridesData(),
     loadDefaultLocationsData(),
-    loadDateLocationsData()
+    loadDateLocationsData(),
+    loadSchoolEventsData()
   ]);
   render();
   if (loadFailed) toast('일부 데이터를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
@@ -494,6 +545,7 @@ function setupRealtime() {
       .channel('school-planner-realtime-v2')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'assessments' }, scheduleReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'timetable' }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'school_events' }, scheduleReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'timetable_overrides' }, scheduleReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'subject_locations' }, scheduleReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'timetable_location_overrides' }, scheduleReload)
@@ -562,6 +614,9 @@ function updateAuthUI() {
   }
   if (editDateBtn) {
     editDateBtn.style.display = isAdmin ? 'inline-flex' : 'none';
+  }
+  if ($('schoolEventsBtn')) {
+    $('schoolEventsBtn').style.display = isAdmin && supabaseClient ? 'inline-flex' : 'none';
   }
 }
 
@@ -700,9 +755,10 @@ function renderCalendar() {
   const y = selectedDate.getFullYear(), m = selectedDate.getMonth(); $('monthTitle').textContent = `${y}년 ${m + 1}월`;
   const first = new Date(y, m, 1), start = new Date(y, m, 1 - first.getDay()); const lastDay = new Date(y, m + 1, 0).getDate(); const needed = Math.ceil((first.getDay() + lastDay) / 7) * 7; const today = fmtDate(new Date());
   $('calendar').innerHTML = Array.from({ length: needed }, (_, index) => {
-    const date = new Date(start); date.setDate(start.getDate() + index); const iso = fmtDate(date), inMonth = date.getMonth() === m, weekday = date.getDay(), dayItems = items.filter(item => item.date === iso).sort((a, b) => Number(a.period || 99) - Number(b.period || 99)); const holiday = holidays[iso];
+    const date = new Date(start); date.setDate(start.getDate() + index); const iso = fmtDate(date), inMonth = date.getMonth() === m, weekday = date.getDay(), dayItems = items.filter(item => item.date === iso).sort((a, b) => Number(a.period || 99) - Number(b.period || 99)); const evs = dayEvents(iso); const red = evs.some(ev => EVENT_KINDS[ev.kind].red);
+    const evLabels = evs.slice(0, 2).map(ev => `<div class="event-label" data-event-id="${escape(ev.id)}" style="color:${EVENT_KINDS[ev.kind].color}" title="${escape(ev.kind + ' · ' + ev.title)}">${escape(ev.title)}</div>`).join('') + (evs.length > 2 ? `<div class="event-label more-events" data-event-day="${iso}">+${evs.length - 2}</div>` : '');
     const events = dayItems.slice(0, 3).map(item => `<button class="calendar-entry" data-id="${escape(item.id)}" style="border-color:${subjectColors[item.subject] || '#a7b4c5'}">${item.period ? item.period + '교시 ' : ''}${escape(item.title)}</button>`).join('');
-    return `<div class="day ${inMonth ? '' : 'other'} ${weekday === 0 ? 'sun' : ''} ${weekday === 6 ? 'sat' : ''} ${holiday ? 'holiday' : ''} ${iso === today ? 'today' : ''}" data-date="${iso}"><span class="date-number">${date.getDate()}</span>${holiday ? `<div class="holiday-name">${holiday}</div>` : ''}${events}${dayItems.length > 3 ? `<div class="more">+ ${dayItems.length - 3}개 더</div>` : ''}</div>`;
+    return `<div class="day ${inMonth ? '' : 'other'} ${weekday === 0 ? 'sun' : ''} ${weekday === 6 ? 'sat' : ''} ${red ? 'holiday' : ''} ${iso === today ? 'today' : ''}" data-date="${iso}"><span class="date-number">${date.getDate()}</span>${evLabels}${events}${dayItems.length > 3 ? `<div class="more">+ ${dayItems.length - 3}개 더</div>` : ''}</div>`;
   }).join('');
 }
 function renderUpcoming() {
@@ -772,12 +828,12 @@ function renderDayTabs() {
 function renderDailyView() {
   const iso = $('scheduleDate').value || fmtDate(new Date()), date = new Date(`${iso}T12:00:00`), weekday = date.getDay(), today = fmtDate(new Date());
   $('dailyTitle').textContent = iso === today ? '오늘의 수업' : `${date.getMonth() + 1}월 ${date.getDate()}일 수업`;
-  const holiday = holidays[iso];
+  const off = noClassEvent(iso);
   const dayItems = items.filter(item => item.date === iso).sort((a, b) => Number(a.period || 99) - Number(b.period || 99));
   const linkedItemIds = new Set();
 
-  if (holiday) {
-    $('dailySchedule').innerHTML = `<div class="daily-holiday">${holiday} · 수업이 없어요</div>`;
+  if (off) {
+    $('dailySchedule').innerHTML = `<div class="daily-holiday">${escape(off.title)} · 수업이 없어요</div>`;
   } else if (weekday === 0 || weekday === 6) {
     $('dailySchedule').innerHTML = '<p class="daily-empty">주말에는 정규 수업이 없어요.</p>';
   } else {
@@ -845,6 +901,12 @@ function renderDailyView() {
         </div>
       </div>`;
     }).join('');
+  }
+
+  // 수업은 있는 학사일정(행사·시험기간)은 시간표 위에 띠로 보여 준다.
+  const banners = dayEvents(iso).filter(ev => ev !== off);
+  if (banners.length) {
+    $('dailySchedule').insertAdjacentHTML('afterbegin', banners.map(ev => `<div class="daily-event" data-event-id="${escape(ev.id)}" style="border-color:${EVENT_KINDS[ev.kind].color}"><span class="daily-event-kind" style="color:${EVENT_KINDS[ev.kind].color}">${ev.kind}</span> ${escape(ev.title)}${ev.start_date !== ev.end_date ? ` <small>(${eventRangeText(ev)})</small>` : ''}${ev.note ? `<small class="daily-event-note">${escape(ev.note)}</small>` : ''}</div>`).join(''));
   }
 
   // Priority 3: Unlinked items
@@ -1126,6 +1188,109 @@ function previewImage(src) {
   box.append(img, hint);
 }
 
+// ===== 학사일정 보기 · 관리 =====
+function renderEventList(list, emptyText) {
+  $('eventList').innerHTML = list.length ? list.map(ev => `
+    <div class="event-row">
+      <span class="event-kind" style="background:${EVENT_KINDS[ev.kind].color}">${ev.kind}</span>
+      <div class="event-main">
+        <strong>${escape(ev.title)}</strong>
+        <small>${eventRangeText(ev)}${ev.note ? ' · ' + escape(ev.note) : ''}</small>
+      </div>
+      ${isAdmin && supabaseClient && !String(ev.id).startsWith('fallback-') ? `<button type="button" class="tiny-btn" data-edit-event="${escape(ev.id)}">수정</button>` : ''}
+    </div>`).join('') : `<p class="nothing">${emptyText}</p>`;
+}
+
+function fillEventForm(ev, presetDate = '') {
+  $('eventId').value = ev?.id || '';
+  $('eventKind').value = ev?.kind || '행사';
+  $('eventTitle').value = ev?.title || '';
+  $('eventStart').value = ev?.start_date || presetDate || fmtDate(new Date());
+  $('eventEnd').value = ev?.end_date || presetDate || $('eventStart').value;
+  $('eventNote').value = ev?.note || '';
+  $('eventFormTitle').textContent = ev ? '학사일정 수정' : '새 학사일정';
+  $('deleteEventBtn').hidden = !ev;
+}
+
+function openEventDialog({ title, list, emptyText = '학사일정이 없어요.', edit = null, presetDate = '' }) {
+  const canEdit = isAdmin && !!supabaseClient;
+  $('eventDialogTitle').textContent = title;
+  renderEventList(list, emptyText);
+  $('eventAdmin').hidden = !canEdit;
+  $('newEventBtn').hidden = !canEdit;
+  $('saveEventBtn').hidden = !canEdit;
+  $('deleteEventBtn').hidden = true;
+  if (canEdit) fillEventForm(edit, presetDate);
+  $('eventDialog').showModal();
+}
+
+function showSchoolEvent(id) {
+  const ev = schoolEvents.find(e => String(e.id) === String(id));
+  if (!ev) return;
+  openEventDialog({ title: ev.title, list: [ev], edit: ev });
+}
+
+function openMonthEvents() {
+  const y = selectedDate.getFullYear(), m = selectedDate.getMonth();
+  const first = fmtDate(new Date(y, m, 1)), last = fmtDate(new Date(y, m + 1, 0));
+  const list = schoolEvents.filter(ev => ev.start_date <= last && ev.end_date >= first);
+  openEventDialog({ title: `${y}년 ${m + 1}월 학사일정`, list, emptyText: '이번 달 학사일정이 없어요.' });
+}
+
+async function saveSchoolEvent() {
+  if (!isAdmin || !supabaseClient) return;
+  const id = $('eventId').value;
+  const row = {
+    kind: $('eventKind').value,
+    title: $('eventTitle').value.trim(),
+    start_date: $('eventStart').value,
+    end_date: $('eventEnd').value || $('eventStart').value,
+    note: $('eventNote').value.trim(),
+    updated_at: new Date().toISOString()
+  };
+  if (!row.title) return toast('이름을 입력해 주세요.');
+  if (!row.start_date) return toast('시작일을 입력해 주세요.');
+  if (row.end_date < row.start_date) return toast('끝나는 날이 시작일보다 빨라요.');
+  if ((new Date(row.end_date) - new Date(row.start_date)) / 86400000 > 120) return toast('학사일정 하나는 120일까지만 넣을 수 있어요.');
+  const btn = $('saveEventBtn');
+  btn.disabled = true;
+  try {
+    const { error } = id
+      ? await supabaseClient.from('school_events').update(row).eq('id', id)
+      : await supabaseClient.from('school_events').insert(row);
+    if (error) throw error;
+    await loadAllData();
+    $('eventDialog').close();
+    toast('학사일정을 저장했어요.');
+  } catch (err) {
+    console.error('학사일정 저장 실패:', err);
+    toast('학사일정을 저장하지 못했어요.');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function deleteSchoolEvent() {
+  const id = $('eventId').value;
+  if (!id || !isAdmin || !confirm('이 학사일정을 삭제할까요?')) return;
+  const { error } = await supabaseClient.from('school_events').delete().eq('id', id);
+  if (error) { console.error('학사일정 삭제 실패:', error); return toast('학사일정을 삭제하지 못했어요.'); }
+  await loadAllData();
+  $('eventDialog').close();
+  toast('학사일정을 삭제했어요.');
+}
+
+$('schoolEventsBtn').onclick = openMonthEvents;
+$('saveEventBtn').onclick = saveSchoolEvent;
+$('deleteEventBtn').onclick = deleteSchoolEvent;
+$('newEventBtn').onclick = () => fillEventForm(null);
+$('closeEventDialog').onclick = () => $('eventDialog').close();
+$('eventForm').addEventListener('submit', event => { event.preventDefault(); saveSchoolEvent(); });
+$('eventList').addEventListener('click', event => {
+  const btn = event.target.closest('[data-edit-event]');
+  if (btn) fillEventForm(schoolEvents.find(e => String(e.id) === btn.dataset.editEvent));
+});
+
 // ===== 사진 크게 보기 · 다운로드 =====
 let viewerImage = '';
 let viewerName = '';
@@ -1238,6 +1403,8 @@ document.querySelectorAll('.view-tab').forEach(button => button.addEventListener
 $('scheduleToday').onclick = () => { $('scheduleDate').value = fmtDate(new Date()); renderDayTabs(); renderDailyView(); };
 $('scheduleDate').addEventListener('change', () => { renderDayTabs(); renderDailyView(); });
 $('dailySchedule').addEventListener('click', event => {
+  const evBanner = event.target.closest('[data-event-id]');
+  if (evBanner) return showSchoolEvent(evBanner.dataset.eventId);
   // [＋ 일정 추가] 버튼 클릭
   const addBtn = event.target.closest('.tiny-add-btn');
   if (addBtn) {
@@ -1259,7 +1426,7 @@ $('dailySchedule').addEventListener('click', event => {
   }
 });
 $('dailyTasks').addEventListener('click', event => { const task = event.target.closest('[data-id]'); if (task) openEdit(task.dataset.id); });
-$('calendar').addEventListener('click', event => { const entry = event.target.closest('[data-id]'); if (entry) return openEdit(entry.dataset.id); const cell = event.target.closest('.day'); if (cell) openNew(cell.dataset.date); });
+$('calendar').addEventListener('click', event => { const evLabel = event.target.closest('[data-event-id]'); if (evLabel) return showSchoolEvent(evLabel.dataset.eventId); const evDay = event.target.closest('[data-event-day]'); if (evDay) return openEventDialog({ title: `${dateText(evDay.dataset.eventDay)} 학사일정`, list: dayEvents(evDay.dataset.eventDay), presetDate: evDay.dataset.eventDay }); const entry = event.target.closest('[data-id]'); if (entry) return openEdit(entry.dataset.id); const cell = event.target.closest('.day'); if (cell) openNew(cell.dataset.date); });
 $('upcomingList').addEventListener('click', event => { const card = event.target.closest('[data-id]'); if (card) openEdit(card.dataset.id); });
 $('period').addEventListener('change', () => { const recommended = daySubject($('date').value, $('period').value); if (recommended) $('subject').value = recommended; });
 $('date').addEventListener('change', () => { const recommended = daySubject($('date').value, $('period').value); if (recommended) $('subject').value = recommended; });

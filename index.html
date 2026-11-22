@@ -35,7 +35,11 @@
         <div class="calendar-header">
           <div class="month-nav"><button aria-label="이전 달" id="prevMonth">‹</button>
             <h2 id="monthTitle"></h2><button aria-label="다음 달" id="nextMonth">›</button>
-          </div><span class="holiday-key">● 공휴일</span>
+          </div>
+          <div class="calendar-tools">
+            <span class="event-key"><i style="background:#d6535c"></i>쉬는 날<i style="background:#2f9469"></i>방학<i style="background:#7a5cd6"></i>행사<i style="background:#506cfe"></i>시험</span>
+            <button type="button" class="tiny-btn" id="schoolEventsBtn" style="display:none;">📅 학사일정</button>
+          </div>
         </div>
         <div class="weekdays">
           <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>
@@ -122,6 +126,40 @@
       <div class="dialog-actions"><button type="button" class="danger" id="deleteBtn"
           hidden>삭제</button><span></span><button type="button" class="secondary" id="cancelBtn">취소</button><button
           class="primary" id="saveBtn">저장</button></div>
+    </form>
+  </dialog>
+  <dialog id="eventDialog">
+    <form id="eventForm" method="dialog">
+      <div class="dialog-title">
+        <div>
+          <p class="eyebrow">학사일정</p>
+          <h2 id="eventDialogTitle">학사일정</h2>
+        </div><button type="button" class="close" id="closeEventDialog">×</button>
+      </div>
+      <div id="eventList" class="event-list"></div>
+      <div id="eventAdmin" hidden>
+        <p class="event-form-title" id="eventFormTitle">새 학사일정</p>
+        <input type="hidden" id="eventId" />
+        <div class="form-grid">
+          <label>종류<select id="eventKind">
+              <option>행사</option>
+              <option>휴업일</option>
+              <option>방학</option>
+              <option>시험기간</option>
+              <option>공휴일</option>
+            </select></label>
+          <label>이름<input id="eventTitle" maxlength="60" placeholder="예: 개교기념일, 체험학습" /></label>
+          <label>시작일<input id="eventStart" type="date" /></label>
+          <label>끝나는 날<input id="eventEnd" type="date" /></label>
+          <label class="wide">메모<input id="eventNote" maxlength="300" placeholder="선택" /></label>
+        </div>
+        <p class="event-help">공휴일·휴업일·방학은 수업이 없는 날로 표시되고, 행사·시험기간은 시간표 위에 띠로 표시돼요.</p>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="danger" id="deleteEventBtn" hidden>삭제</button><span></span>
+        <button type="button" class="secondary" id="newEventBtn" hidden>새로 만들기</button>
+        <button type="button" class="primary" id="saveEventBtn" hidden>저장</button>
+      </div>
     </form>
   </dialog>
   <dialog id="imageViewer" class="image-viewer" aria-label="사진 크게 보기">
