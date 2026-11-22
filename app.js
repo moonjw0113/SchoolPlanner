@@ -61,6 +61,25 @@ const fmtDate = date => `${date.getFullYear()}-${String(date.getMonth() + 1).pad
 const dateText = iso => new Intl.DateTimeFormat('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' }).format(new Date(`${iso}T12:00:00`));
 const escape = text => String(text).replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
 
+// DB 값은 누가 넣었는지 믿을 수 없으므로, 화면에 쓰기 전에 형식을 검사해 정리한다.
+const ITEM_TYPES = ['수행평가', '과제', '시험', '기타'];
+const isSafeImage = src => typeof src === 'string' && /^data:image\/(png|jpe?g|gif|webp|bmp|avif);base64,[A-Za-z0-9+/=]+$/i.test(src);
+function normalizeItem(raw) {
+  const period = String(raw.period ?? '');
+  return {
+    id: String(raw.id ?? ''),
+    title: String(raw.title ?? ''),
+    type: ITEM_TYPES.includes(raw.type) ? raw.type : '기타',
+    date: /^\d{4}-\d{2}-\d{2}$/.test(raw.date) ? raw.date : '',
+    period: /^[1-7]$/.test(period) ? period : '',
+    subject: String(raw.subject ?? ''),
+    description: String(raw.description ?? ''),
+    image: isSafeImage(raw.image) ? raw.image : '',
+    completed: Boolean(raw.completed),
+    updatedAt: raw.updated_at || raw.updatedAt || ''
+  };
+}
+
 function getEffectiveLesson(isoDate, period, dayOfWeek) {
   if (isoDate && period && dateTimetableOverrides[isoDate] && dateTimetableOverrides[isoDate][period]) {
     const ov = dateTimetableOverrides[isoDate][period];
@@ -98,16 +117,13 @@ function isDateOverride(isoDate, period) {
 // ===== Supabase Data Fetching & Sync =====
 async function loadItemsData() {
   if (!supabaseClient) {
-    try { items = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch { items = []; }
+    try { items = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]').map(normalizeItem).filter(item => item.id && item.date); } catch { items = []; }
     return;
   }
   try {
     const { data, error } = await supabaseClient.from('assessments').select('*').order('date', { ascending: true });
     if (error) throw error;
-    items = (data || []).map(item => ({
-      ...item,
-      updatedAt: item.updated_at || item.updatedAt || new Date().toISOString()
-    }));
+    items = (data || []).map(normalizeItem).filter(item => item.id && item.date);
   } catch (err) {
     console.error('assessments 로드 실패:', err);
   }
@@ -696,7 +712,7 @@ function renderCalendar() {
   const first = new Date(y, m, 1), start = new Date(y, m, 1 - first.getDay()); const lastDay = new Date(y, m + 1, 0).getDate(); const needed = Math.ceil((first.getDay() + lastDay) / 7) * 7; const today = fmtDate(new Date());
   $('calendar').innerHTML = Array.from({ length: needed }, (_, index) => {
     const date = new Date(start); date.setDate(start.getDate() + index); const iso = fmtDate(date), inMonth = date.getMonth() === m, weekday = date.getDay(), dayItems = items.filter(item => item.date === iso).sort((a, b) => Number(a.period || 99) - Number(b.period || 99)); const holiday = holidays[iso];
-    const events = dayItems.slice(0, 3).map(item => `<button class="calendar-entry" data-id="${item.id}" style="border-color:${subjectColors[item.subject] || '#a7b4c5'}">${item.period ? item.period + '교시 ' : ''}${escape(item.title)}</button>`).join('');
+    const events = dayItems.slice(0, 3).map(item => `<button class="calendar-entry" data-id="${escape(item.id)}" style="border-color:${subjectColors[item.subject] || '#a7b4c5'}">${item.period ? item.period + '교시 ' : ''}${escape(item.title)}</button>`).join('');
     return `<div class="day ${inMonth ? '' : 'other'} ${weekday === 0 ? 'sun' : ''} ${weekday === 6 ? 'sat' : ''} ${holiday ? 'holiday' : ''} ${iso === today ? 'today' : ''}" data-date="${iso}"><span class="date-number">${date.getDate()}</span>${holiday ? `<div class="holiday-name">${holiday}</div>` : ''}${events}${dayItems.length > 3 ? `<div class="more">+ ${dayItems.length - 3}개 더</div>` : ''}</div>`;
   }).join('');
 }
@@ -710,9 +726,9 @@ function renderUpcoming() {
   }
   $('upcomingList').innerHTML = monthItems.slice(0, 8).map(item => {
     const borderColor = subjectColors[item.subject] || '#506cfe';
-    return `<article class="task-card" data-id="${item.id}" style="border-left-color:${borderColor}">
+    return `<article class="task-card" data-id="${escape(item.id)}" style="border-left-color:${borderColor}">
       <div class="task-card-header">
-        <span class="task-type-badge type-${item.type || '과제'}">${escape(item.type || '과제')}</span>
+        <span class="task-type-badge type-${escape(item.type || '과제')}">${escape(item.type || '과제')}</span>
         <span class="task-subject-pill">${escape(item.subject)}</span>
       </div>
       <h3 class="task-title">${escape(item.title)}</h3>
@@ -826,7 +842,7 @@ function renderDailyView() {
         const iconMap = { '수행평가': '📝', '과제': '📌', '시험': '✏️', '기타': '🏷️' };
         const icon = iconMap[item.type] || '📌';
         return `
-                    <div class="period-task-chip type-${item.type || '과제'}" data-id="${item.id}" title="클릭하여 일정 상세 보기">
+                    <div class="period-task-chip type-${escape(item.type || '과제')}" data-id="${escape(item.id)}" title="클릭하여 일정 상세 보기">
                       <span class="task-chip-badge">${icon} ${escape(item.type || '과제')}</span>
                       <span class="task-chip-title">${escape(item.title)}</span>
                     </div>
@@ -844,7 +860,7 @@ function renderDailyView() {
   const unlinkedItems = dayItems.filter(item => !linkedItemIds.has(item.id));
   if (unlinkedItems.length) {
     $('dailyTasks').innerHTML = `<h3>기타 / 교시 미지정 수행평가 · 과제</h3>${unlinkedItems.map(item => `
-      <div class="daily-task" data-id="${item.id}" title="클릭하여 일정 상세 보기">
+      <div class="daily-task" data-id="${escape(item.id)}" title="클릭하여 일정 상세 보기">
         ${item.period ? item.period + '교시 · ' : ''}${item.subject ? '[' + escape(item.subject) + '] ' : ''}${escape(item.title)}
       </div>
     `).join('')}`;
@@ -1084,7 +1100,15 @@ function openDateTimetableDialog(isoDate = '') {
   $('dateTimetableDialog').showModal();
 }
 
-function previewImage(src) { $('imagePreview').innerHTML = src ? `<img alt="첨부 사진 미리보기" src="${src}">` : ''; }
+function previewImage(src) {
+  const box = $('imagePreview');
+  box.replaceChildren();
+  if (!isSafeImage(src)) return;
+  const img = document.createElement('img');
+  img.alt = '첨부 사진 미리보기';
+  img.src = src;
+  box.appendChild(img);
+}
 function getFileAsData(file) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); }); }
 
 function goToTodayView() {
@@ -1154,7 +1178,7 @@ $('calendar').addEventListener('click', event => { const entry = event.target.cl
 $('upcomingList').addEventListener('click', event => { const card = event.target.closest('[data-id]'); if (card) openEdit(card.dataset.id); });
 $('period').addEventListener('change', () => { const recommended = daySubject($('date').value, $('period').value); if (recommended) $('subject').value = recommended; });
 $('date').addEventListener('change', () => { const recommended = daySubject($('date').value, $('period').value); if (recommended) $('subject').value = recommended; });
-$('image').addEventListener('change', async event => { const file = event.target.files[0]; if (!file) return; if (file.size > 1.5 * 1024 * 1024) { toast('사진은 1.5MB 이하로 선택해 주세요.'); event.target.value = ''; return; } editImage = await getFileAsData(file); previewImage(editImage); });
+$('image').addEventListener('change', async event => { const file = event.target.files[0]; if (!file) return; if (file.size > 1.5 * 1024 * 1024) { toast('사진은 1.5MB 이하로 선택해 주세요.'); event.target.value = ''; return; } const dataUrl = await getFileAsData(file); if (!isSafeImage(dataUrl)) { toast('PNG, JPG, GIF, WEBP 사진만 첨부할 수 있어요.'); event.target.value = ''; return; } editImage = dataUrl; previewImage(editImage); });
 $('closeDialog').onclick = $('cancelBtn').onclick = () => $('entryDialog').close();
 $('deleteBtn').onclick = async () => { if (!editingId || !confirm('이 일정을 삭제할까요?')) return; try { await deleteItem(editingId); $('entryDialog').close(); render(); toast('일정을 삭제했어요.'); } catch (err) { toast(err.message || '삭제하지 못했어요.'); } };
 $('entryForm').addEventListener('submit', async event => { event.preventDefault(); if (!isAdmin) return; const save = $('saveBtn'); save.disabled = true; save.textContent = '저장 중…'; try { const id = $('entryId').value; await saveItem({ id, title: $('title').value, date: $('date').value, period: $('period').value, subject: $('subject').value, type: $('type').value, description: $('description').value, image: editImage, completed: id ? items.find(item => item.id === id)?.completed : false }); selectedDate = new Date(`${$('date').value}T12:00:00`); $('scheduleDate').value = $('date').value; $('entryDialog').close(); render(); toast('저장했어요.'); } catch (error) { toast(error.message || '저장하지 못했어요.'); } finally { save.disabled = false; save.textContent = '저장'; } });
