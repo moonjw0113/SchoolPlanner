@@ -117,12 +117,23 @@
             id="description" rows="3" maxlength="500" placeholder="준비물, 범위, 제출 방법 등을 적어두세요."></textarea></label><label
           class="wide image-field">사진 첨부 <input id="image" type="file" accept="image/*" /><small>1.5MB 이하 · PNG, JPG, GIF,
             WEBP</small>
-          <div id="imagePreview"></div>
-        </label></div>
+        </label>
+        <div id="imagePreview" class="wide"></div></div>
       <div class="dialog-actions"><button type="button" class="danger" id="deleteBtn"
           hidden>삭제</button><span></span><button type="button" class="secondary" id="cancelBtn">취소</button><button
           class="primary" id="saveBtn">저장</button></div>
     </form>
+  </dialog>
+  <dialog id="imageViewer" class="image-viewer" aria-label="사진 크게 보기">
+    <div class="image-viewer-bar">
+      <span id="imageViewerTitle" class="image-viewer-title"></span>
+      <button type="button" class="image-viewer-btn" id="imageZoomBtn">🔍 원본 크기</button>
+      <button type="button" class="image-viewer-btn" id="imageDownloadBtn">⬇ 다운로드</button>
+      <button type="button" class="image-viewer-btn close-btn" id="closeImageViewer" aria-label="닫기">×</button>
+    </div>
+    <div class="image-viewer-body" id="imageViewerBody">
+      <img id="imageViewerImg" alt="첨부 사진" />
+    </div>
   </dialog>
   <dialog id="loginDialog">
     <form id="loginForm" method="dialog">
