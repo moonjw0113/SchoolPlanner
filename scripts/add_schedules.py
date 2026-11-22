@@ -7,6 +7,11 @@ Claude Code 채팅에서 사진 속 일정을 넣을 때 쓴다. 사용법은
     python3 scripts/add_schedules.py items.json --image a.jpg --image b.png
     python3 scripts/add_schedules.py items.json --dry-run      # 검사와 중복 확인만
     python3 scripts/add_schedules.py --check                   # 연결·권한 확인만
+    python3 scripts/add_schedules.py events.json --school-events   # 학사일정 저장
+
+학사일정 events.json 형식 (배열, end_date는 하루짜리면 생략 가능):
+    [{"title": "겨울방학", "kind": "방학", "start_date": "2026-12-31", "end_date": "2027-02-28", "note": ""}]
+    kind: 공휴일, 휴업일, 방학(수업 없는 날) / 행사, 시험기간(수업 있는 날)
 
 items.json 형식 (배열):
     [{"title": "통합사회 발표", "date": "2026-11-25", "type": "수행평가",
@@ -92,6 +97,61 @@ def clean_item(raw, n):
     return {"title": title, "date": date, "type": kind, "period": period, "subject": subject, "description": description}
 
 
+EVENT_KINDS = ("공휴일", "휴업일", "방학", "행사", "시험기간")
+
+
+def clean_event(raw, n):
+    label = f"{n}번째 학사일정"
+    title = str(raw.get("title", "")).strip()
+    kind = str(raw.get("kind", "")).strip()
+    start = str(raw.get("start_date", "")).strip()
+    end = str(raw.get("end_date") or start).strip()
+    note = str(raw.get("note") or "").strip()
+    errors = []
+    if not 1 <= len(title) <= 60:
+        errors.append("이름은 1~60자")
+    if kind not in EVENT_KINDS:
+        errors.append(f"종류는 {', '.join(EVENT_KINDS)} 중 하나 (받은 값: {kind!r})")
+    if not valid_date(start) or not valid_date(end):
+        errors.append(f"날짜는 YYYY-MM-DD 실제 날짜 (받은 값: {start!r} ~ {end!r})")
+    elif end < start or (dt.date.fromisoformat(end) - dt.date.fromisoformat(start)).days > 120:
+        errors.append("끝나는 날은 시작일과 같거나 뒤, 기간은 120일 이하")
+    if len(note) > 300:
+        errors.append("메모는 300자 이하")
+    if errors:
+        raise ValueError(f"{label}: " + ", ".join(errors))
+    return {"title": title, "kind": kind, "start_date": start, "end_date": end, "note": note}
+
+
+def add_school_events(path, dry_run):
+    with open(path, encoding="utf-8") as f:
+        raw_events = json.load(f)
+    if not isinstance(raw_events, list) or not raw_events:
+        sys.exit("학사일정 JSON은 하나 이상 든 배열이어야 합니다.")
+    try:
+        events = [clean_event(raw, n) for n, raw in enumerate(raw_events, 1)]
+    except ValueError as e:
+        sys.exit(f"형식 오류로 아무것도 저장하지 않았습니다: {e}")
+    existing = request("GET", "school_events?select=id,title,start_date")
+    seen = {(r["start_date"], r["title"].strip().lower()) for r in existing}
+    to_add = [e for e in events if (e["start_date"], e["title"].lower()) not in seen]
+    for e in events:
+        mark = "저장 예정" if e in to_add else "건너뜀(이미 있음)"
+        span = e["start_date"] if e["start_date"] == e["end_date"] else f"{e['start_date']} ~ {e['end_date']}"
+        print(f"{mark}: {span} [{e['kind']}] {e['title']}")
+    if dry_run or not to_add:
+        print(f"{'dry-run: ' if dry_run else ''}새 학사일정 {len(to_add)}개, 건너뜀 {len(events) - len(to_add)}개. 저장하지 않았습니다.")
+        return
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    request("POST", "school_events", [{**e, "updated_at": now} for e in to_add], prefer="return=minimal")
+    after = request("GET", "school_events?select=title,start_date")
+    saved = {(r["start_date"], r["title"].strip().lower()) for r in after}
+    missing = [e["title"] for e in to_add if (e["start_date"], e["title"].lower()) not in saved]
+    if missing:
+        sys.exit("저장 후 확인에서 찾지 못한 학사일정: " + ", ".join(missing))
+    print(f"완료: 새 학사일정 {len(to_add)}개, 건너뜀 {len(events) - len(to_add)}개. 다시 읽어서 확인했습니다.")
+
+
 def build_image(paths):
     """사진 여러 장을 세로로 이어 붙여 JPEG 하나로 만들고 data URL로 돌려준다."""
     try:
@@ -137,7 +197,14 @@ def main():
     parser.add_argument("--image", action="append", default=[], help="첨부할 사진 (여러 번 쓰면 세로로 이어 붙임)")
     parser.add_argument("--dry-run", action="store_true", help="저장하지 않고 검사와 중복 확인만")
     parser.add_argument("--check", action="store_true", help="연결과 비밀 키 권한만 확인")
+    parser.add_argument("--school-events", action="store_true", help="items 파일을 학사일정(school_events)으로 저장")
     args = parser.parse_args()
+
+    if args.school_events:
+        if not args.items:
+            parser.error("학사일정 JSON 파일이 필요합니다")
+        add_school_events(args.items, args.dry_run)
+        return
 
     if args.check:
         # admins는 RLS로 막혀 있어 공개 키로는 0줄, 비밀 키로는 관리자 수만큼 보인다.
