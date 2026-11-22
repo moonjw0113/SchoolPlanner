@@ -1110,10 +1110,90 @@ function previewImage(src) {
   box.replaceChildren();
   if (!isSafeImage(src)) return;
   const img = document.createElement('img');
-  img.alt = '첨부 사진 미리보기';
+  img.alt = '첨부 사진 미리보기 (누르면 크게 보기)';
+  img.title = '누르면 크게 볼 수 있어요';
   img.src = src;
-  box.appendChild(img);
+  img.className = 'zoomable';
+  // 미리보기는 사진 첨부 <label> 안에 있어서, 막지 않으면 누를 때 파일 선택 창이 열린다.
+  img.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    openImageViewer(src, $('title').value);
+  });
+  const hint = document.createElement('small');
+  hint.className = 'image-hint';
+  hint.textContent = '사진을 누르면 크게 보고 다운로드할 수 있어요.';
+  box.append(img, hint);
 }
+
+// ===== 사진 크게 보기 · 다운로드 =====
+let viewerImage = '';
+let viewerName = '';
+
+function openImageViewer(src, title = '') {
+  if (!isSafeImage(src)) return;
+  viewerImage = src;
+  const date = $('date').value || fmtDate(new Date());
+  viewerName = `${date}_${(title || '첨부사진').trim()}`.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 80);
+  $('imageViewerTitle').textContent = title || '첨부 사진';
+  $('imageViewerImg').src = src;
+  setViewerZoom(false);
+  $('imageViewer').showModal();
+}
+
+function setViewerZoom(zoomed) {
+  $('imageViewer').classList.toggle('zoomed', zoomed);
+  $('imageZoomBtn').textContent = zoomed ? '↙ 화면에 맞추기' : '🔍 원본 크기';
+}
+
+function toggleViewerZoom(event) {
+  const zoomed = !$('imageViewer').classList.contains('zoomed');
+  const body = $('imageViewerBody');
+  const img = $('imageViewerImg');
+  // 누른 위치를 기준으로 확대한다.
+  let rx = 0.5, ry = 0.5;
+  if (event && event.target === img) {
+    const r = img.getBoundingClientRect();
+    rx = (event.clientX - r.left) / r.width;
+    ry = (event.clientY - r.top) / r.height;
+  }
+  setViewerZoom(zoomed);
+  if (zoomed) {
+    body.scrollLeft = img.offsetWidth * rx - body.clientWidth / 2;
+    body.scrollTop = img.offsetHeight * ry - body.clientHeight / 2;
+  }
+}
+
+function downloadViewerImage() {
+  try {
+    const [head, b64] = viewerImage.split(',');
+    const mime = head.match(/^data:([^;]+);base64$/)[1];
+    const ext = { 'image/jpeg': 'jpg', 'image/svg+xml': 'svg' }[mime] || mime.split('/')[1];
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${viewerName}.${ext}`;
+    $('imageViewer').appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch (err) {
+    console.error('사진 다운로드 실패:', err);
+    toast('사진을 다운로드하지 못했어요. 사진을 길게 눌러 저장해 주세요.');
+  }
+}
+
+$('imageViewerImg').addEventListener('click', toggleViewerZoom);
+$('imageZoomBtn').onclick = () => toggleViewerZoom();
+$('imageDownloadBtn').onclick = downloadViewerImage;
+$('closeImageViewer').onclick = () => $('imageViewer').close();
+// 사진 바깥(어두운 부분)을 누르면 닫는다.
+$('imageViewer').addEventListener('click', event => {
+  if (event.target === $('imageViewer') || event.target === $('imageViewerBody')) $('imageViewer').close();
+});
 function getFileAsData(file) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); }); }
 
 function goToTodayView() {
