@@ -8,6 +8,8 @@ Claude Code 채팅에서 사진 속 일정을 넣을 때 쓴다. 사용법은
     python3 scripts/add_schedules.py items.json --dry-run      # 검사와 중복 확인만
     python3 scripts/add_schedules.py --check                   # 연결·권한 확인만
     python3 scripts/add_schedules.py events.json --school-events   # 학사일정 저장
+    python3 scripts/add_schedules.py --reminders morning       # 알림 문구 (오늘·내일 수행평가·과제)
+    python3 scripts/add_schedules.py --reminders night         # 알림 문구 (내일 수행평가·과제)
 
 학사일정 events.json 형식 (배열, end_date는 하루짜리면 생략 가능):
     [{"title": "겨울방학", "kind": "방학", "start_date": "2026-12-31", "end_date": "2027-02-28", "note": ""}]
@@ -152,6 +154,36 @@ def add_school_events(path, dry_run):
     print(f"완료: 새 학사일정 {len(to_add)}개, 건너뜀 {len(events) - len(to_add)}개. 다시 읽어서 확인했습니다.")
 
 
+REMINDER_TYPES = ("수행평가", "과제")
+
+
+def reminders(when):
+    """매일 아침·밤 알림용 문구를 출력한다. 알릴 것이 없으면 '알림 없음'을 출력한다."""
+    today = dt.datetime.now(KST).date()
+    tomorrow = today + dt.timedelta(days=1)
+    groups = [("오늘", today), ("내일", tomorrow)] if when == "morning" else [("내일", tomorrow)]
+    dates = ",".join(d.isoformat() for _, d in groups)
+    types = urllib.parse.quote(",".join(REMINDER_TYPES))
+    rows = request("GET", f"assessments?select=title,type,date,period,subject,description&type=in.({types})&date=in.({dates})&order=date,period")
+    weekday = "월화수목금토일"
+    lines = []
+    for label, d in groups:
+        day_rows = sorted((r for r in rows if r["date"] == d.isoformat()), key=lambda r: int(r["period"] or 99))
+        if not day_rows:
+            continue
+        lines.append(f"[{label} {d.month}/{d.day}({weekday[d.weekday()]})]")
+        for r in day_rows:
+            period = f"{r['period']}교시 " if r["period"] else ""
+            memo = (r.get("description") or "").strip().replace("\n", " ")
+            memo = f" - {memo[:60]}{'…' if len(memo) > 60 else ''}" if memo else ""
+            lines.append(f"• {period}{r['subject']} {r['type']}: {r['title']}{memo}")
+    if not lines:
+        print("알림 없음")
+        return
+    title = "📚 오늘·내일 수행평가·과제" if when == "morning" else "🌙 내일 수행평가·과제"
+    print(title + "\n" + "\n".join(lines))
+
+
 def build_image(paths):
     """사진 여러 장을 세로로 이어 붙여 JPEG 하나로 만들고 data URL로 돌려준다."""
     try:
@@ -198,7 +230,12 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="저장하지 않고 검사와 중복 확인만")
     parser.add_argument("--check", action="store_true", help="연결과 비밀 키 권한만 확인")
     parser.add_argument("--school-events", action="store_true", help="items 파일을 학사일정(school_events)으로 저장")
+    parser.add_argument("--reminders", choices=["morning", "night"], help="알림 문구 출력 (아침: 오늘·내일, 밤: 내일)")
     args = parser.parse_args()
+
+    if args.reminders:
+        reminders(args.reminders)
+        return
 
     if args.school_events:
         if not args.items:
