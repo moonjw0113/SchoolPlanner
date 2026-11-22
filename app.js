@@ -562,6 +562,9 @@ function updateAuthUI() {
   if (editDateBtn) {
     editDateBtn.style.display = isAdmin ? 'inline-flex' : 'none';
   }
+  if ($('connectorBtn')) {
+    $('connectorBtn').style.display = isAdmin && supabaseClient ? 'inline-flex' : 'none';
+  }
 }
 
 async function refreshAdminState() {
@@ -706,10 +709,12 @@ function renderCalendar() {
 }
 function renderUpcoming() {
   const monthPrefix = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}`;
-  const monthItems = items.filter(item => item.date.startsWith(monthPrefix)).sort((a, b) => a.date.localeCompare(b.date) || Number(a.period || 99) - Number(b.period || 99));
+  const today = fmtDate(new Date());
+  // 이미 지난 일정은 빼고 오늘 이후 일정만 보여준다. (ISO 날짜라 문자열 비교로 충분)
+  const monthItems = items.filter(item => item.date.startsWith(monthPrefix) && item.date >= today).sort((a, b) => a.date.localeCompare(b.date) || Number(a.period || 99) - Number(b.period || 99));
   $('openCount').textContent = `${monthItems.length}개 일정`;
   if (!monthItems.length) {
-    $('upcomingList').innerHTML = '<p class="nothing">이번 달 일정이 없어요.</p>';
+    $('upcomingList').innerHTML = '<p class="nothing">이번 달 남은 일정이 없어요.</p>';
     return;
   }
   $('upcomingList').innerHTML = monthItems.slice(0, 8).map(item => {
@@ -1101,6 +1106,89 @@ function openDateTimetableDialog(isoDate = '') {
   renderDateTimetableEditGrid(dateToUse);
   $('dateTimetableDialog').showModal();
 }
+
+// ===== Claude 커넥터 연결 주소 =====
+// claude.ai가 부를 MCP 서버(supabase/functions/planner-mcp) 주소에 관리자별 비밀 토큰을 붙인다.
+// DB에는 토큰의 해시만 저장되므로 주소는 만들 때 한 번만 보여 줄 수 있다.
+const CONNECTOR_URL_BASE = `${SUPABASE_URL}/functions/v1/planner-mcp/`;
+
+function newConnectorToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const b64 = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return `pln_${b64}`;
+}
+
+async function refreshConnectorStatus() {
+  const box = $('connectorStatus');
+  box.textContent = '연결 상태를 확인하는 중…';
+  try {
+    const { data, error } = await supabaseClient.rpc('connector_status');
+    if (error) throw error;
+    const when = iso => iso ? new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(iso)) : '';
+    if (data) {
+      box.textContent = `✅ 연결 주소가 있어요 (만든 날: ${when(data.createdAt)}${data.lastUsedAt ? `, 마지막 사용: ${when(data.lastUsedAt)}` : ', 아직 사용 안 함'})`;
+      $('createConnectorBtn').textContent = '새 주소 만들기';
+      $('revokeConnectorBtn').hidden = false;
+    } else {
+      box.textContent = '아직 연결 주소가 없어요.';
+      $('createConnectorBtn').textContent = '연결 주소 만들기';
+      $('revokeConnectorBtn').hidden = true;
+    }
+  } catch (err) {
+    console.error('커넥터 상태 확인 실패:', err);
+    box.textContent = err?.code === 'PGRST202'
+      ? '⚠ Supabase에 claude-connector.sql을 먼저 실행해 주세요.'
+      : '연결 상태를 확인하지 못했어요.';
+    $('revokeConnectorBtn').hidden = true;
+  }
+}
+
+function openConnectorDialog() {
+  if (!isAdmin || !supabaseClient) return;
+  $('connectorUrlBox').hidden = true;
+  $('connectorUrl').value = '';
+  $('connectorDialog').showModal();
+  refreshConnectorStatus();
+}
+
+async function createConnectorUrl() {
+  if (!$('revokeConnectorBtn').hidden && !confirm('새 주소를 만들면 지금 쓰는 주소는 바로 끊겨요. claude.ai 커넥터의 URL도 새 주소로 바꿔야 해요. 계속할까요?')) return;
+  const token = newConnectorToken();
+  const btn = $('createConnectorBtn');
+  btn.disabled = true;
+  try {
+    const { error } = await supabaseClient.rpc('set_connector_token', { p_token: token });
+    if (error) throw error;
+    $('connectorUrl').value = CONNECTOR_URL_BASE + token;
+    $('connectorUrlBox').hidden = false;
+    $('connectorUrl').select();
+    await refreshConnectorStatus();
+  } catch (err) {
+    console.error('연결 주소 만들기 실패:', err);
+    toast(err?.code === 'PGRST202' ? 'Supabase에 claude-connector.sql을 먼저 실행해 주세요.' : (err?.message || '연결 주소를 만들지 못했어요.'));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function revokeConnector() {
+  if (!confirm('연결을 끊으면 claude.ai에서 더 이상 일정을 넣을 수 없어요. 끊을까요?')) return;
+  const { error } = await supabaseClient.rpc('revoke_connector_token');
+  if (error) return toast('연결을 끊지 못했어요.');
+  $('connectorUrlBox').hidden = true;
+  $('connectorUrl').value = '';
+  await refreshConnectorStatus();
+  toast('연결을 끊었어요.');
+}
+
+$('connectorBtn').onclick = openConnectorDialog;
+$('createConnectorBtn').onclick = createConnectorUrl;
+$('revokeConnectorBtn').onclick = revokeConnector;
+$('closeConnectorDialog').onclick = $('cancelConnectorBtn').onclick = () => $('connectorDialog').close();
+$('copyConnectorUrl').onclick = async () => {
+  try { await navigator.clipboard.writeText($('connectorUrl').value); toast('연결 주소를 복사했어요.'); }
+  catch { $('connectorUrl').select(); toast('주소를 길게 눌러 직접 복사해 주세요.'); }
+};
 
 function previewImage(src) {
   const box = $('imagePreview');

@@ -858,3 +858,17 @@
     padding: 4px 7px;
   }
 }
+/* ===== Claude 커넥터 연결 ===== */
+.connector-status { font-size: 13px; margin: 0 0 12px; }
+.connector-url[hidden] { display: none; }
+.connector-url { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; margin-bottom: 12px; }
+.connector-url input { font-family: ui-monospace, monospace; font-size: 11px; }
+.connector-steps { font-size: 12px; color: #515560; padding-left: 18px; line-height: 1.7; margin: 0 0 10px; }
+.connector-steps code { background: #f2f3f5; border-radius: 5px; padding: 1px 5px; }
+.connector-warn { font-size: 11px; color: #a0522d; background: #fff6ee; border-radius: 9px; padding: 8px 10px; margin: 0; }
+@media (max-width: 620px) {
+  .top-actions { gap: 5px; }
+  .top-actions .secondary { padding: 9px 9px; font-size: 12px; }
+  .brand { gap: 7px; }
+  #connectorBtn .btn-label { display: none; }
+}
