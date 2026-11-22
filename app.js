@@ -46,6 +46,8 @@ const holidays = {
 };
 
 const STORAGE_KEY = 'school-planner-assessments-v1';
+// 목록은 사진(image) 없이 불러오고, 사진은 일정을 열 때만 받는다.
+const ITEM_LIST_COLUMNS = 'id,title,type,date,period,subject,description,completed,updated_at';
 
 // 클라이언트 상태
 let items = [];
@@ -54,7 +56,8 @@ let dateLocations = {};
 let dateTimetableOverrides = {};
 let dbSchedule = { ...defaultSchedule };
 let dbTeachers = { ...defaultTeachers };
-let selectedDate = new Date(), editImage = '', editingId = null;
+let selectedDate = new Date(), editImage = '', editImageChanged = false, editingId = null;
+let loadFailed = false;
 
 const $ = id => document.getElementById(id);
 const fmtDate = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -121,11 +124,12 @@ async function loadItemsData() {
     return;
   }
   try {
-    const { data, error } = await supabaseClient.from('assessments').select('*').order('date', { ascending: true });
+    const { data, error } = await supabaseClient.from('assessments').select(ITEM_LIST_COLUMNS).order('date', { ascending: true });
     if (error) throw error;
     items = (data || []).map(normalizeItem).filter(item => item.id && item.date);
   } catch (err) {
     console.error('assessments 로드 실패:', err);
+    loadFailed = true;
   }
 }
 
@@ -156,6 +160,7 @@ async function loadTimetableData() {
     }
   } catch (err) {
     console.error('timetable 로드 실패:', err);
+    loadFailed = true;
     dbSchedule = { ...defaultSchedule };
     dbTeachers = { ...defaultTeachers };
   }
@@ -200,6 +205,7 @@ async function loadDefaultLocationsData() {
     defaultLocations = locMap;
   } catch (err) {
     console.error('subject_locations 로드 실패:', err);
+    loadFailed = true;
   }
 }
 
@@ -220,6 +226,7 @@ async function loadDateLocationsData() {
     dateLocations = overrideMap;
   } catch (err) {
     console.error('timetable_location_overrides 로드 실패:', err);
+    loadFailed = true;
   }
 }
 
@@ -241,10 +248,12 @@ async function loadDateTimetableOverridesData() {
     dateTimetableOverrides = map;
   } catch (err) {
     console.error('timetable_overrides 로드 실패:', err);
+    loadFailed = true;
   }
 }
 
 async function loadAllData() {
+  loadFailed = false;
   await Promise.all([
     loadItemsData(),
     loadTimetableData(),
@@ -253,17 +262,14 @@ async function loadAllData() {
     loadDateLocationsData()
   ]);
   render();
+  if (loadFailed) toast('일부 데이터를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
 }
 
-async function loadAllDataSilently() {
-  await Promise.all([
-    loadItemsData(),
-    loadTimetableData(),
-    loadDateTimetableOverridesData(),
-    loadDefaultLocationsData(),
-    loadDateLocationsData()
-  ]);
-  render();
+// Realtime 이벤트가 몰려와도 한 번만 다시 불러온다.
+let reloadTimer = null;
+function scheduleReload() {
+  clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(loadAllData, 400);
 }
 
 async function saveDefaultTimetable(newSchedule, newTeachers) {
@@ -297,6 +303,7 @@ async function saveDefaultTimetable(newSchedule, newTeachers) {
     } catch (e) {
       console.error('Supabase 기본 시간표 저장 오류:', e);
       toast('기본 시간표 저장에 실패했습니다.');
+      await loadAllData(); // 화면에 먼저 반영한 값을 서버 상태로 되돌린다.
       return;
     }
   }
@@ -345,7 +352,8 @@ async function saveDateTimetableOverride(isoDate, periodOverrides) {
   if (supabaseClient) {
     try {
       if (idsToDelete.length) {
-        await supabaseClient.from('timetable_overrides').delete().in('id', idsToDelete);
+        const { error } = await supabaseClient.from('timetable_overrides').delete().in('id', idsToDelete);
+        if (error) throw error;
       }
       if (rowsToUpsert.length) {
         const { error } = await supabaseClient.from('timetable_overrides').upsert(rowsToUpsert);
@@ -354,6 +362,7 @@ async function saveDateTimetableOverride(isoDate, periodOverrides) {
     } catch (e) {
       console.error('Supabase 특정 날짜 시간표 저장 오류:', e);
       toast('특정 날짜 시간표 저장에 실패했습니다.');
+      await loadAllData(); // 화면에 먼저 반영한 값을 서버 상태로 되돌린다.
       return;
     }
   }
@@ -378,37 +387,12 @@ async function resetDateTimetableOverride(isoDate) {
     } catch (e) {
       console.error('Supabase 특정 날짜 시간표 초기화 오류:', e);
       toast('시간표 초기화에 실패했습니다.');
+      await loadAllData(); // 화면에 먼저 반영한 값을 서버 상태로 되돌린다.
       return;
     }
   }
   render();
   toast(`${dateText(isoDate)} 시간표가 기본 시간표로 복원되었습니다.`);
-}
-
-function applyNeisTimetableData(defaultRows, overrideRows) {
-  if (Array.isArray(defaultRows)) {
-    const scheduleMap = { 1: ['', '', '', '', ''], 2: ['', '', '', '', ''], 3: ['', '', '', '', ''], 4: ['', '', '', '', ''], 5: ['', '', '', '', ''], 6: ['', '', '', '', ''], 7: ['', '', '', '', ''] };
-    const teacherMap = { 1: ['', '', '', '', ''], 2: ['', '', '', '', ''], 3: ['', '', '', '', ''], 4: ['', '', '', '', ''], 5: ['', '', '', '', ''], 6: ['', '', '', '', ''], 7: ['', '', '', '', ''] };
-    defaultRows.forEach(row => {
-      if (row.period >= 1 && row.period <= 7 && row.day_of_week >= 1 && row.day_of_week <= 5) {
-        scheduleMap[row.period][row.day_of_week - 1] = row.subject || '';
-        teacherMap[row.period][row.day_of_week - 1] = row.teacher || '';
-      }
-    });
-    dbSchedule = scheduleMap;
-    dbTeachers = teacherMap;
-  }
-  if (Array.isArray(overrideRows)) {
-    const map = {};
-    overrideRows.forEach(row => {
-      if (row.date && row.period) {
-        if (!map[row.date]) map[row.date] = {};
-        map[row.date][row.period] = { subject: row.subject || '', teacher: row.teacher || '' };
-      }
-    });
-    dateTimetableOverrides = map;
-  }
-  render();
 }
 
 async function setDefaultLocation(subject, location) {
@@ -439,6 +423,7 @@ async function setDefaultLocation(subject, location) {
     } catch (e) {
       console.error('Supabase 기본 장소 저장 오류:', e);
       toast('기본 장소 저장에 실패했습니다.');
+      await loadAllData(); // 화면에 먼저 반영한 값을 서버 상태로 되돌린다.
       return;
     }
   }
@@ -484,6 +469,7 @@ async function setDateLocation(isoDate, period, location) {
     } catch (e) {
       console.error('Supabase 특정 날짜 장소 저장 오류:', e);
       toast('수업 장소 저장에 실패했습니다.');
+      await loadAllData(); // 화면에 먼저 반영한 값을 서버 상태로 되돌린다.
       return;
     }
   }
@@ -505,11 +491,11 @@ function setupRealtime() {
   try {
     realtimeChannel = supabaseClient
       .channel('school-planner-realtime-v2')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'assessments' }, () => loadAllDataSilently())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'timetable' }, () => loadAllDataSilently())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'timetable_overrides' }, () => loadAllDataSilently())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'subject_locations' }, () => loadAllDataSilently())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'timetable_location_overrides' }, () => loadAllDataSilently())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'assessments' }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'timetable' }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'timetable_overrides' }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subject_locations' }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'timetable_location_overrides' }, scheduleReload)
       .subscribe((status) => {
         console.log('Supabase Realtime 구독 상태:', status);
       });
@@ -522,7 +508,7 @@ function startFallbackTimer() {
   stopFallbackTimer();
   fallbackTimer = setInterval(() => {
     if (document.visibilityState === 'visible') {
-      loadAllDataSilently();
+      loadAllData();
     }
   }, 60000);
 }
@@ -536,7 +522,7 @@ function stopFallbackTimer() {
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
-    loadAllDataSilently();
+    loadAllData();
     startFallbackTimer();
   } else {
     stopFallbackTimer();
@@ -674,6 +660,8 @@ async function saveItem(item) {
   };
 
   if (supabaseClient) {
+    // 기존 일정에서 사진을 바꾸지 않았으면 image 열은 보내지 않아 DB 값을 그대로 둔다.
+    if (item.id && !item.imageChanged) delete record.image;
     const { error } = await supabaseClient.from('assessments').upsert([record]);
     if (error) {
       console.error('Supabase 저장 오류:', error);
@@ -995,18 +983,32 @@ function openNew(iso = fmtDate(new Date()), period = '') {
     toast('등록 권한이 필요합니다. 상단의 [🔑 관리자 로그인] 버튼으로 로그인해 주세요.');
     return;
   }
-  editingId = null; editImage = ''; $('entryForm').reset(); $('entryId').value = ''; $('formEyebrow').textContent = '새 일정'; $('formTitle').textContent = '수행평가·과제 추가'; $('deleteBtn').hidden = true; $('imagePreview').innerHTML = ''; setFormDisabled(false); setDateAndSubject(iso, period); $('entryDialog').showModal(); $('title').focus();
+  editingId = null; editImage = ''; editImageChanged = false; $('entryForm').reset(); $('entryId').value = ''; $('formEyebrow').textContent = '새 일정'; $('formTitle').textContent = '수행평가·과제 추가'; $('deleteBtn').hidden = true; $('imagePreview').innerHTML = ''; setFormDisabled(false); setDateAndSubject(iso, period); $('entryDialog').showModal(); $('title').focus();
 }
 
 function openEdit(id) {
   const item = items.find(value => value.id === id); if (!item) return;
-  editingId = id; editImage = item.image || ''; $('entryId').value = id; $('title').value = item.title; $('type').value = item.type; $('date').value = item.date; $('period').value = item.period; $('subject').value = item.subject; $('description').value = item.description; $('image').value = ''; previewImage(editImage);
+  editingId = id; editImage = item.image || ''; editImageChanged = false; $('entryId').value = id; $('title').value = item.title; $('type').value = item.type; $('date').value = item.date; $('period').value = item.period; $('subject').value = item.subject; $('description').value = item.description; $('image').value = ''; previewImage(editImage);
   if (isAdmin) {
     $('formEyebrow').textContent = '일정 수정'; $('formTitle').textContent = item.title; $('deleteBtn').hidden = false; setFormDisabled(false);
   } else {
     $('formEyebrow').textContent = '일정 상세 (조회 전용)'; $('formTitle').textContent = item.title; $('deleteBtn').hidden = true; setFormDisabled(true);
   }
   $('entryDialog').showModal();
+  if (supabaseClient) loadItemImage(id);
+}
+
+async function loadItemImage(id) {
+  try {
+    const { data, error } = await supabaseClient.from('assessments').select('image').eq('id', id).maybeSingle();
+    if (error) throw error;
+    // 그 사이 다른 일정을 열었거나 새 사진을 골랐으면 무시한다.
+    if (editingId !== id || editImageChanged) return;
+    editImage = isSafeImage(data?.image) ? data.image : '';
+    previewImage(editImage);
+  } catch (err) {
+    console.error('사진 불러오기 실패:', err);
+  }
 }
 
 let currentLocTarget = null;
@@ -1178,10 +1180,10 @@ $('calendar').addEventListener('click', event => { const entry = event.target.cl
 $('upcomingList').addEventListener('click', event => { const card = event.target.closest('[data-id]'); if (card) openEdit(card.dataset.id); });
 $('period').addEventListener('change', () => { const recommended = daySubject($('date').value, $('period').value); if (recommended) $('subject').value = recommended; });
 $('date').addEventListener('change', () => { const recommended = daySubject($('date').value, $('period').value); if (recommended) $('subject').value = recommended; });
-$('image').addEventListener('change', async event => { const file = event.target.files[0]; if (!file) return; if (file.size > 1.5 * 1024 * 1024) { toast('사진은 1.5MB 이하로 선택해 주세요.'); event.target.value = ''; return; } const dataUrl = await getFileAsData(file); if (!isSafeImage(dataUrl)) { toast('PNG, JPG, GIF, WEBP 사진만 첨부할 수 있어요.'); event.target.value = ''; return; } editImage = dataUrl; previewImage(editImage); });
+$('image').addEventListener('change', async event => { const file = event.target.files[0]; if (!file) return; if (file.size > 1.5 * 1024 * 1024) { toast('사진은 1.5MB 이하로 선택해 주세요.'); event.target.value = ''; return; } const dataUrl = await getFileAsData(file); if (!isSafeImage(dataUrl)) { toast('PNG, JPG, GIF, WEBP 사진만 첨부할 수 있어요.'); event.target.value = ''; return; } editImage = dataUrl; editImageChanged = true; previewImage(editImage); });
 $('closeDialog').onclick = $('cancelBtn').onclick = () => $('entryDialog').close();
 $('deleteBtn').onclick = async () => { if (!editingId || !confirm('이 일정을 삭제할까요?')) return; try { await deleteItem(editingId); $('entryDialog').close(); render(); toast('일정을 삭제했어요.'); } catch (err) { toast(err.message || '삭제하지 못했어요.'); } };
-$('entryForm').addEventListener('submit', async event => { event.preventDefault(); if (!isAdmin) return; const save = $('saveBtn'); save.disabled = true; save.textContent = '저장 중…'; try { const id = $('entryId').value; await saveItem({ id, title: $('title').value, date: $('date').value, period: $('period').value, subject: $('subject').value, type: $('type').value, description: $('description').value, image: editImage, completed: id ? items.find(item => item.id === id)?.completed : false }); selectedDate = new Date(`${$('date').value}T12:00:00`); $('scheduleDate').value = $('date').value; $('entryDialog').close(); render(); toast('저장했어요.'); } catch (error) { toast(error.message || '저장하지 못했어요.'); } finally { save.disabled = false; save.textContent = '저장'; } });
+$('entryForm').addEventListener('submit', async event => { event.preventDefault(); if (!isAdmin) return; const save = $('saveBtn'); save.disabled = true; save.textContent = '저장 중…'; try { const id = $('entryId').value; await saveItem({ id, title: $('title').value, date: $('date').value, period: $('period').value, subject: $('subject').value, type: $('type').value, description: $('description').value, image: editImage, imageChanged: editImageChanged, completed: id ? items.find(item => item.id === id)?.completed : false }); selectedDate = new Date(`${$('date').value}T12:00:00`); $('scheduleDate').value = $('date').value; $('entryDialog').close(); render(); toast('저장했어요.'); } catch (error) { toast(error.message || '저장하지 못했어요.'); } finally { save.disabled = false; save.textContent = '저장'; } });
 
 if ($('locationForm')) {
   $('locationForm').addEventListener('submit', event => {
